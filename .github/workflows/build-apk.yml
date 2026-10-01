@@ -1,0 +1,82 @@
+# Builds a signed APK on every push and publishes it as a GitHub Release.
+# Newest APK, always at the same link (log in to GitHub first; the repo is private):
+#   https://github.com/mahmoudsamy1610/Scrobot/releases/latest/download/claude-hands.apk
+name: Build APK
+
+on:
+  push:
+    branches: ["**"]
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set version
+        # 1.0.<run>; versionCode grows with every run so each APK installs over the previous one
+        # (the first hand-built APK was versionCode 1).
+        run: |
+          echo "VERSION_NAME=1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$((GITHUB_RUN_NUMBER + 1))" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.14.3
+
+      - name: Install Android build tools (Ubuntu packages)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq aapt apksigner zipalign dalvik-exchange
+
+      - name: Cache Android framework jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/claude-hands-sdk
+          key: android-all-16-robolectric-13921718-14-robolectric-10818077
+
+      - name: Test HTTP server and hands client
+        run: |
+          (cd tools/jvmtest && gradle -q --no-daemon installDist)
+          tools/test-client.sh
+
+      - name: Build and sign APK
+        run: |
+          tools/build-offline.sh
+          cp "app/build/outputs/apk/release/claude-hands-$VERSION_NAME.apk" claude-hands.apk
+          cp client/hands hands
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-hands-${{ env.VERSION_NAME }}
+          path: |
+            claude-hands.apk
+            hands
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$VERSION_NAME"
+          gh release create "$tag" claude-hands.apk hands \
+            --target "$GITHUB_SHA" \
+            --title "Claude Hands $VERSION_NAME (${GITHUB_REF_NAME})" \
+            --notes "Built from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}: $(git log -1 --format=%s)
+
+          Install: download claude-hands.apk on the phone and open it. It installs over the previous version." \
+            --latest

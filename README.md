@@ -18,6 +18,16 @@ permission and exposes a small **HTTP API on `127.0.0.1:8765`**. Requests need a
 | `tools/build-offline.sh` | Builds the signed APK without the Android Gradle Plugin (this is how the release APK was made) |
 | `tools/jvmtest/`, `tools/test-client.sh` | Runs the real `HttpServer` + `Router` on a JVM with stub endpoints and tests `hands` against it |
 
+## Download the latest APK
+
+Every push runs `.github/workflows/build-apk.yml`. It runs the client tests, builds and signs the APK,
+and publishes a GitHub Release `v1.0.<run>` containing `claude-hands.apk` and `hands`. The newest APK always has this link
+(sign in to GitHub in the phone's browser first, because the repo is private):
+
+https://github.com/mahmoudsamy1610/Scrobot/releases/latest/download/claude-hands.apk
+
+The versionCode goes up with every run, so each APK installs over the previous one.
+
 ## Building
 
 - **Android Studio / SDK:** `./gradlew assembleRelease`. The output is `app/build/outputs/apk/release/app-release.apk`, signed with `keystore/`.
