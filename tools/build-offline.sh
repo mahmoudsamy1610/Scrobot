@@ -57,7 +57,7 @@ aapt2 link -o "$BUILD/resources.apk" \
   "$BUILD/res/compiled.zip"
 
 echo "== kotlin"
-gradle -q -p "$ROOT/tools/offline" --no-daemon \
+"${GRADLE:-gradle}" -q -p "$ROOT/tools/offline" --no-daemon \
   -PandroidJar="$ANDROID_JAR" -PgenDir="$BUILD/gen" \
   clean jar copyRuntime
 APP_JAR="$ROOT/tools/offline/build/libs/claude-hands-offline.jar"
