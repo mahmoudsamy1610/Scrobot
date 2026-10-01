@@ -1,0 +1,9 @@
+{
+  "steps": [
+    { "action": "key", "args": ["home"] },
+    { "action": "sleep", "ms": 500 },
+    { "action": "open", "package": "com.android.settings" },
+    { "action": "wait", "text": "Settings", "timeout": 8000 },
+    { "action": "shot", "save": "settings.png" }
+  ]
+}

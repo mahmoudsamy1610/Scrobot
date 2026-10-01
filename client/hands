@@ -35,9 +35,24 @@ usage: hands COMMAND [ARGS]
   open PACKAGE|URL              launch an app or open a link
   wait "TEXT" [ms]              wait until TEXT appears (default 8000 ms)
   wait-gone "TEXT" [ms]         wait until TEXT disappears
+  find "TEXT"                   report whether TEXT is on screen (exit 0 if it is)
+  focus [next|prev|up|down|left|right|first|last]   move input focus, like pressing Tab
+  scroll [forward|backward|up|down|left|right] ["LIST"]   scroll a list
+  sleep MS                      wait inside the app
   shot FILE.png                 save a screenshot
   clip [TEXT]                   set the clipboard, or print it
   (env HANDS_PKG=PACKAGE limits click/type/wait to one app, useful in split screen)
+
+scripts (.scro actions, .json steps, .js, .sh):
+  scripts                       list the scripts the app has
+  import FILE [NAME]            send a local file to the app
+  run NAME [ARG...]             run it and print its output (exit 1 if it failed)
+  run-bg NAME [ARG...]          start it and come back at once
+  script-status                 output of the running or last script
+  stop                          stop the running script
+  check NAME                    parse a script without running it
+  show NAME                     print a script
+  rm NAME                       delete a script
   set-token TOKEN               save the token to ~/.config/scrobot/token
   raw ENDPOINT [JSON]           POST any JSON to any endpoint, e.g. hands raw /tap '{"x":1,"y":2}'
 
@@ -71,6 +86,30 @@ json_str() {
 
 # ,"package":"…" when HANDS_PKG is set
 pkg() { [ -n "${HANDS_PKG:-}" ] && printf ',"package":%s' "$(json_str "$HANDS_PKG")"; }
+
+# "a" "b" -> ["a","b"]
+json_array() {
+  local out="[" first=1 a
+  for a in "$@"; do
+    [ $first -eq 1 ] || out+=","
+    out+="$(json_str "$a")"
+    first=0
+  done
+  printf '%s]' "$out"
+}
+
+# POSTs to PATH and prints the plain-text body, whatever the HTTP status; exit 1 when it failed.
+post_text() {
+  local path=$1 body=$2 tmp code
+  tmp=$(mktemp "${TMPDIR:-/tmp}/hands.XXXXXX") || die "cannot create a temp file"
+  code=$(curl -sS --max-time "${HANDS_TIMEOUT:-1000}" -X POST -H "X-Token: $(token)" \
+    -H 'Content-Type: application/json; charset=utf-8' --data-binary "$body" \
+    -o "$tmp" -w '%{http_code}' "$HANDS_URL$path") \
+    || { rm -f "$tmp"; echo "hands: cannot reach $HANDS_URL (is the Scrobot accessibility service on?)" >&2; exit 1; }
+  cat "$tmp"
+  rm -f "$tmp"
+  [ "$code" = 200 ]
+}
 
 is_int() { [[ $1 =~ ^[0-9]+$ ]] || die "not a number: $1"; }
 
@@ -152,6 +191,45 @@ case $cmd in
     fetch '/screenshot?raw=1' "$1" && echo "saved $1" ;;
   clip|clipboard)
     if [ $# -ge 1 ]; then call POST /clipboard "{\"text\":$(json_str "$1")}"; else call POST /clipboard '{}'; fi ;;
+  find)
+    [ $# -ge 1 ] || die "usage: hands find TEXT"
+    out=$(call POST /find "{\"text\":$(json_str "$1")$(pkg)}") || exit 1
+    printf '%s\n' "$out"
+    [[ $out == *'"found":true'* ]] ;;
+  focus)
+    call POST /focus "{\"direction\":$(json_str "${1:-next}")}" ;;
+  scroll)
+    body="\"direction\":$(json_str "${1:-forward}")"
+    [ $# -ge 2 ] && body+=",\"text\":$(json_str "$2")"
+    call POST /scroll "{$body}" ;;
+  sleep)
+    [ $# -ge 1 ] || die "usage: hands sleep MS"; is_int "$1"
+    call POST /sleep "{\"ms\":$1}" ;;
+  scripts)
+    fetch /scripts ;;
+  import)
+    [ $# -ge 1 ] || die "usage: hands import FILE [NAME]"
+    [ -r "$1" ] || die "cannot read $1"
+    name=${2:-$(basename "$1")}
+    call POST /script/import "{\"name\":$(json_str "$name"),\"source\":$(json_str "$(cat "$1")")}" ;;
+  run|run-bg)
+    [ $# -ge 1 ] || die "usage: hands $cmd NAME [ARG...]"
+    name=$1; shift
+    bg=false; [ "$cmd" = run-bg ] && bg=true
+    post_text /script/run "{\"name\":$(json_str "$name"),\"args\":$(json_array "$@"),\"format\":\"text\",\"background\":$bg}" ;;
+  script-status|status)
+    post_text /script/status '{"format":"text"}' ;;
+  stop)
+    call POST /script/stop '{}' ;;
+  check)
+    [ $# -ge 1 ] || die "usage: hands check NAME"
+    call POST /script/check "{\"name\":$(json_str "$1")}" ;;
+  show)
+    [ $# -ge 1 ] || die "usage: hands show NAME"
+    call POST /script/read "{\"name\":$(json_str "$1")}" ;;
+  rm)
+    [ $# -ge 1 ] || die "usage: hands rm NAME"
+    call POST /script/delete "{\"name\":$(json_str "$1")}" ;;
   set-token)
     [ $# -ge 1 ] || die "usage: hands set-token TOKEN"
     mkdir -p "$(dirname "$TOKEN_FILE_LOCAL")"

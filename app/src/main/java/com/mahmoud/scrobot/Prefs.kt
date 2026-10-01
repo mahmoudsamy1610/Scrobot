@@ -13,7 +13,7 @@ object Prefs {
     private const val TOKEN_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
     const val PORT = 8765
-    const val VERSION = "1.0"
+    const val VERSION = "2.0"
 
     private fun prefs(context: Context): SharedPreferences =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)

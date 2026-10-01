@@ -4,17 +4,24 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.view.accessibility.AccessibilityEvent
 
-/** The accessibility service. It owns the local HTTP API while it is connected. */
+/**
+ * The accessibility service. While it is connected it owns the endpoints ([api]), the local HTTP
+ * server, and the script runner behind them.
+ */
 class HandsService : AccessibilityService() {
 
     private var server: HttpServer? = null
-    private var api: Api? = null
+
+    /** The endpoints. The app screen uses them to run scripts without going through HTTP. */
+    var api: Api? = null
+        private set
 
     val isServerRunning: Boolean get() = server?.isRunning == true
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        api = Api(this)
         ApiLog.note("Accessibility service connected")
         if (Prefs.isApiEnabled(this)) {
             startServer()
@@ -27,17 +34,15 @@ class HandsService : AccessibilityService() {
     @Synchronized
     fun startServer() {
         if (isServerRunning) return
-        val api = Api(this)
+        val api = api ?: return
         val router = Router({ Prefs.token(this) }, ApiLog::add)
         api.register(router)
         val server = HttpServer(Prefs.PORT, router::handle)
         try {
             server.start()
-            this.api = api
             this.server = server
             ApiLog.note("API listening on 127.0.0.1:${Prefs.PORT}")
         } catch (e: Exception) {
-            api.shutdown()
             ApiLog.note("Could not start API on port ${Prefs.PORT}: $e")
         }
     }
@@ -47,8 +52,6 @@ class HandsService : AccessibilityService() {
         val wasRunning = server != null
         server?.stop()
         server = null
-        api?.shutdown()
-        api = null
         if (wasRunning) ApiLog.note("API stopped")
     }
 
@@ -70,6 +73,8 @@ class HandsService : AccessibilityService() {
 
     private fun shutdown() {
         stopServer()
+        api?.shutdown()
+        api = null
         if (instance === this) {
             instance = null
             ApiLog.note("Accessibility service disconnected")

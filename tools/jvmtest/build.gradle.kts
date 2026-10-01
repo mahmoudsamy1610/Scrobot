@@ -6,7 +6,10 @@ plugins {
 sourceSets {
     main {
         kotlin.srcDirs("src")
-        kotlin.include("**/HttpServer.kt", "**/Router.kt", "**/StubServer.kt")
+        kotlin.include(
+            "**/HttpServer.kt", "**/Router.kt", "**/ScriptParser.kt", "**/ActionInterpreter.kt",
+            "**/StubServer.kt", "**/ParserTest.kt",
+        )
         kotlin.srcDir("../../app/src/main/java")
     }
 }

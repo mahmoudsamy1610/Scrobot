@@ -3,17 +3,68 @@ package com.mahmoud.scrobot
 import org.json.JSONObject
 
 /**
- * Serves the real HttpServer + Router on 127.0.0.1:<port> with the token from argv[0].
- * Endpoints echo what they received instead of touching a screen.
+ * `test` runs the script-language checks; otherwise serves the real HttpServer + Router on
+ * 127.0.0.1:<port> with the token from argv[0]. Endpoints echo what they received instead of
+ * touching a screen.
  */
+/** `parse FILE...` checks scripts without a phone: it prints each step, or the first mistake. */
+private fun parseFiles(paths: List<String>): Int {
+    var bad = 0
+    for (path in paths) {
+        val file = java.io.File(path)
+        val source = file.readText()
+        try {
+            val steps = if (path.endsWith(".json")) ScriptParser.parseJson(source) else ScriptParser.parse(source)
+            for (step in steps) {
+                if (step.verb in ScriptParser.CONTROL) {
+                    println("%-24s %s".format(file.name, "$step   (control)"))
+                } else {
+                    val (endpoint, body) = ScriptParser.request(step)
+                    println("%-24s %-44s -> %s %s".format(file.name, step.toString(), endpoint, body))
+                }
+            }
+            println("%-24s OK, ${steps.size} steps".format(file.name))
+        } catch (e: ScriptError) {
+            println("%-24s FAILED line ${e.line}: ${e.message}".format(file.name))
+            bad++
+        }
+    }
+    return bad
+}
+
 fun main(args: Array<String>) {
+    if (args.firstOrNull() == "test") {
+        kotlin.system.exitProcess(ParserTest.run())
+    }
+    if (args.firstOrNull() == "parse") {
+        kotlin.system.exitProcess(parseFiles(args.drop(1)))
+    }
     val token = args.getOrElse(0) { "TESTTOKEN" }
     val port = args.getOrElse(1) { "8765" }.toInt()
     val router = Router({ token }, { m, p, ok, err, ms -> System.err.println("$m $p ok=$ok err=$err ${ms}ms") })
-    router.route("/ping") { JSONObject().put("version", "1.0") }
-    for (path in listOf("/tap", "/longpress", "/swipe", "/click", "/type", "/key", "/open", "/wait", "/clipboard")) {
+    router.route("/ping") { JSONObject().put("version", "2.0") }
+    for (path in listOf(
+        "/tap", "/longpress", "/swipe", "/click", "/type", "/key", "/open", "/wait", "/clipboard",
+        "/focus", "/scroll", "/sleep", "/script/run", "/script/stop", "/script/import",
+        "/script/delete",
+    )) {
         router.route(path) { a -> JSONObject().put("endpoint", path).put("received", a) }
     }
+    router.route("/scripts") {
+        JSONObject()
+            .put("dir", "/sdcard/Android/data/com.mahmoud.scrobot/files/scripts")
+            .put("scripts", org.json.JSONArray().put(JSONObject().put("name", "login.scro").put("kind", "actions").put("size", 42)))
+    }
+    router.route("/find") { a ->
+        JSONObject().put("found", a.optString("text") == "Send").put("received", a)
+    }
+    router.route("/script/check") { a ->
+        JSONObject().put("checked", true).put("steps", 3).put("name", a.optString("name"))
+    }
+    router.route("/script/read") { a ->
+        JSONObject().put("script", JSONObject().put("name", a.optString("name"))).put("source", "tap 1 2\n")
+    }
+    router.route("/script/status") { JSONObject().put("status", "idle") }
     router.route("/fail") { throw ApiError("no visible node matches text=\"x\"", 404) }
     router.route("/screen") { a ->
         if (a.optString("format") == "text") {

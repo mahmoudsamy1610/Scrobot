@@ -37,24 +37,219 @@ class Api(private val service: AccessibilityService) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val gestureLock = Any()
 
+    /** Every endpoint, by path. Scripts call these directly; the HTTP server goes through [Router]. */
+    private val actions = LinkedHashMap<String, (JSONObject) -> Any>()
+
+    val scripts = ScriptRunner(service, this)
+
+    init {
+        actions["/ping"] = { JSONObject().put("version", Prefs.VERSION).put("service", true) }
+        actions["/screen"] = ::screen
+        actions["/tap"] = { a -> tap(int(a, "x"), int(a, "y"), a.optLong("ms", 60)) }
+        actions["/longpress"] = { a -> tap(int(a, "x"), int(a, "y"), a.optLong("ms", 800)) }
+        actions["/swipe"] = ::swipe
+        actions["/click"] = ::click
+        actions["/type"] = ::type
+        actions["/key"] = ::key
+        actions["/open"] = ::open
+        actions["/wait"] = ::waitFor
+        actions["/find"] = ::find
+        actions["/focus"] = ::focus
+        actions["/scroll"] = ::scroll
+        actions["/sleep"] = ::sleep
+        actions["/screenshot"] = ::screenshot
+        actions["/clipboard"] = ::clipboard
+        actions["/scripts"] = { JSONObject().put("scripts", ScriptStore.listJson(service)).put("dir", ScriptStore.dir(service).absolutePath) }
+        actions["/script/run"] = { a -> scripts.run(a) }
+        actions["/script/stop"] = { scripts.stop() }
+        actions["/script/status"] = { a ->
+            val status = scripts.status()
+            if (a.optString("format") == "text") {
+                HttpServer.textResponse(200, status.optJSONArray("output")?.let { out ->
+                    (0 until out.length()).joinToString("\n") { out.optString(it) } +
+                        "\n-- " + status.optString("script", "no script") + ": " + status.optString("status")
+                } ?: ("-- " + status.optString("status")))
+            } else {
+                status
+            }
+        }
+        actions["/script/import"] = ::importScript
+        actions["/script/check"] = ::checkScript
+        actions["/script/read"] = ::readScript
+        actions["/script/delete"] = ::deleteScript
+    }
+
     fun register(router: Router) {
-        router.route("/ping") { JSONObject().put("version", Prefs.VERSION).put("service", true) }
-        router.route("/screen", ::screen)
-        router.route("/tap") { a -> tap(int(a, "x"), int(a, "y"), a.optLong("ms", 60)) }
-        router.route("/longpress") { a -> tap(int(a, "x"), int(a, "y"), a.optLong("ms", 800)) }
-        router.route("/swipe", ::swipe)
-        router.route("/click", ::click)
-        router.route("/type", ::type)
-        router.route("/key", ::key)
-        router.route("/open", ::open)
-        router.route("/wait", ::waitFor)
-        router.route("/screenshot", ::screenshot)
-        router.route("/clipboard", ::clipboard)
+        for ((path, handler) in actions) router.route(path, handler)
+    }
+
+    /** Calls an endpoint from inside the app (used by every script runner). */
+    fun invoke(endpoint: String, args: JSONObject): Any {
+        val handler = actions[endpoint.trimEnd('/').ifEmpty { "/" }]
+            ?: throw ApiError("unknown endpoint $endpoint", 404)
+        return handler(args)
     }
 
     fun shutdown() {
+        if (scripts.isRunning) runCatching { scripts.stop() }
         callbackThread.quitSafely()
         screenshotExecutor.shutdown()
+    }
+
+    // ---------------------------------------------------------------- scripts
+
+    private fun importScript(a: JSONObject): JSONObject {
+        val name = str(a, "name") ?: throw ApiError("missing \"name\"")
+        val source = if (a.has("source") && !a.isNull("source")) a.getString("source")
+            else throw ApiError("missing \"source\"")
+        val file = ScriptStore.save(service, name, source)
+        ApiLog.note("Imported script \"${file.name}\"")
+        return JSONObject().put("imported", ScriptStore.toJson(file))
+    }
+
+    /** Parses an action or JSON script without running it, and reports the first mistake. */
+    private fun checkScript(a: JSONObject): JSONObject {
+        val name = str(a, "name")
+        val source = if (a.has("source") && !a.isNull("source")) a.getString("source")
+        else ScriptStore.find(service, name ?: throw ApiError("give \"name\" or \"source\""))?.readText()
+            ?: throw ApiError("no script called \"$name\"", 404)
+        val kind = if (name != null) ScriptStore.Kind.of(name) else ScriptStore.Kind.ACTIONS
+        val out = JSONObject().put("kind", kind.label)
+        return try {
+            val steps = when (kind) {
+                ScriptStore.Kind.JSON -> ScriptParser.parseJson(source)
+                ScriptStore.Kind.ACTIONS -> ScriptParser.parse(source)
+                else -> return out.put("checked", false)
+                    .put("note", "${kind.label} scripts are checked by their own engine when they run")
+            }
+            for (step in steps) if (step.verb !in ScriptParser.CONTROL) ScriptParser.request(step)
+            out.put("checked", true).put("steps", steps.size)
+        } catch (e: ScriptError) {
+            throw ApiError(if (e.line > 0) "line ${e.line}: ${e.message}" else e.message ?: "bad script")
+        }
+    }
+
+    private fun readScript(a: JSONObject): JSONObject {
+        val name = str(a, "name") ?: throw ApiError("missing \"name\"")
+        val file = ScriptStore.find(service, name) ?: throw ApiError("no script called \"$name\"", 404)
+        return JSONObject().put("script", ScriptStore.toJson(file)).put("source", file.readText())
+    }
+
+    private fun deleteScript(a: JSONObject): JSONObject {
+        val name = str(a, "name") ?: throw ApiError("missing \"name\"")
+        if (!ScriptStore.delete(service, name)) throw ApiError("no script called \"$name\"", 404)
+        return JSONObject().put("deleted", name)
+    }
+
+    // ---------------------------------------------------------------- /find, /focus, /scroll, /sleep
+
+    /** Like /click's search, but it only reports what it found. */
+    private fun find(a: JSONObject): JSONObject {
+        val sel = selector(a)
+        val found = Nodes.find(service, sel)
+        return JSONObject().put("found", found != null)
+            .put("node", found?.let { Nodes.toJson(it.node, it.win) } ?: JSONObject.NULL)
+    }
+
+    /** Keyboard-style navigation: move input focus between the focusable nodes on screen. */
+    private fun focus(a: JSONObject): JSONObject {
+        val direction = (str(a, "direction") ?: "next").lowercase()
+        val sel = Selector.from(a)
+        val target = if (!sel.isEmpty) {
+            Nodes.find(service, sel) ?: throw ApiError("no visible node matches ${sel.describe()}", 404)
+        } else {
+            val candidates = Nodes.focusable(service)
+            if (candidates.isEmpty()) throw ApiError("nothing on screen can take focus", 404)
+            val currentIndex = candidates.indexOfFirst { it.node.isFocused }
+            when (direction) {
+                "next", "forward", "tab" ->
+                    candidates[if (currentIndex < 0) 0 else (currentIndex + 1) % candidates.size]
+                "previous", "prev", "back" ->
+                    candidates[if (currentIndex < 0) candidates.size - 1 else (currentIndex - 1 + candidates.size) % candidates.size]
+                "up", "down", "left", "right" -> nearest(candidates, currentIndex, direction)
+                    ?: throw ApiError("nothing to focus $direction of the current field", 404)
+                "first" -> candidates.first()
+                "last" -> candidates.last()
+                else -> throw ApiError("unknown direction \"$direction\"; use next, previous, up, down, left, right, first or last")
+            }
+        }
+        if (!target.node.performAction(AccessibilityNodeInfo.ACTION_FOCUS) &&
+            !target.node.performAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS)
+        ) {
+            throw ApiError("the node refused focus", 500)
+        }
+        return JSONObject().put("direction", direction).put("node", Nodes.toJson(target.node, target.win))
+    }
+
+    /** The focusable node nearest to the current one in a given direction. */
+    private fun nearest(candidates: List<Found>, currentIndex: Int, direction: String): Found? {
+        val from = candidates.getOrNull(currentIndex) ?: return candidates.firstOrNull()
+        val origin = Nodes.center(from.node)
+        return candidates.asSequence()
+            .filter { it !== from }
+            .map { it to Nodes.center(it.node) }
+            .filter { (_, c) ->
+                when (direction) {
+                    "up" -> c[1] < origin[1]
+                    "down" -> c[1] > origin[1]
+                    "left" -> c[0] < origin[0]
+                    else -> c[0] > origin[0]
+                }
+            }
+            .minByOrNull { (_, c) ->
+                val dx = (c[0] - origin[0]).toLong()
+                val dy = (c[1] - origin[1]).toLong()
+                // Favour nodes lined up with the current one over ones far off to the side.
+                if (direction == "up" || direction == "down") dy * dy + 4 * dx * dx else dx * dx + 4 * dy * dy
+            }
+            ?.first
+    }
+
+    /** Scrolls a scrollable list, falling back to a swipe when nothing reports itself scrollable. */
+    private fun scroll(a: JSONObject): JSONObject {
+        val direction = (str(a, "direction") ?: "forward").lowercase()
+        val sel = Selector.from(a)
+        val target = if (!sel.isEmpty) Nodes.find(service, sel) else Nodes.largestScrollable(service)
+        val action = when (direction) {
+            "forward", "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+            "backward", "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+            "left" -> AccessibilityAction.ACTION_SCROLL_LEFT.id
+            "right" -> AccessibilityAction.ACTION_SCROLL_RIGHT.id
+            else -> throw ApiError("unknown direction \"$direction\"; use forward, backward, up, down, left or right")
+        }
+        if (target != null && target.node.isScrollable && target.node.performAction(action)) {
+            SystemClock.sleep(250)
+            return JSONObject().put("direction", direction).put("method", "action_scroll")
+                .put("node", Nodes.toJson(target.node, target.win))
+        }
+        // Swiping the opposite way to the scroll: to move the list forward, drag content upwards.
+        val bounds = target?.let { Rect().also { r -> it.node.getBoundsInScreen(r) } } ?: Nodes.screenBounds(service)
+        val cx = bounds.centerX()
+        val cy = bounds.centerY()
+        val dy = (bounds.height() * 0.35).toInt().coerceAtLeast(80)
+        val dx = (bounds.width() * 0.35).toInt().coerceAtLeast(80)
+        when (direction) {
+            "forward", "down" -> swipeBetween(cx, cy + dy, cx, cy - dy)
+            "backward", "up" -> swipeBetween(cx, cy - dy, cx, cy + dy)
+            "left" -> swipeBetween(cx - dx, cy, cx + dx, cy)
+            else -> swipeBetween(cx + dx, cy, cx - dx, cy)
+        }
+        return JSONObject().put("direction", direction).put("method", "swipe")
+    }
+
+    private fun swipeBetween(x1: Int, y1: Int, x2: Int, y2: Int) {
+        val path = Path().apply {
+            moveTo(x1.toFloat(), y1.toFloat())
+            lineTo(x2.toFloat(), y2.toFloat())
+        }
+        gesture(path, 300)
+        SystemClock.sleep(250)
+    }
+
+    private fun sleep(a: JSONObject): JSONObject {
+        val ms = a.optLong("ms", 500).coerceIn(0, 5 * 60_000)
+        SystemClock.sleep(ms)
+        return JSONObject().put("slept", ms)
     }
 
     // ---------------------------------------------------------------- /screen
@@ -380,6 +575,15 @@ class Api(private val service: AccessibilityService) {
             out.toByteArray()
         }
         val mime = if (jpeg) "image/jpeg" else "image/png"
+        if (a.has("save")) {
+            val given = a.optString("save").trim()
+            val name = if (given.isEmpty()) "shot-${System.currentTimeMillis()}.${if (jpeg) "jpg" else "png"}"
+                else ScriptStore.safeName(given)
+            val file = java.io.File(ScriptStore.shotsDir(service), name)
+            file.writeBytes(bytes)
+            return JSONObject().put("mime", mime).put("width", bitmap.width).put("height", bitmap.height)
+                .put("saved", file.absolutePath)
+        }
         if (flag(a, "raw")) return HttpResponse(200, mime, bytes)
         return JSONObject().put("mime", mime).put("width", bitmap.width).put("height", bitmap.height)
             .put(if (jpeg) "jpeg" else "png", Base64.encodeToString(bytes, Base64.NO_WRAP))

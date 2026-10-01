@@ -1,0 +1,14 @@
+# Keyboard-style navigation: step through the fields on screen, then scroll the list.
+# Useful to check what /focus and /scroll see.
+
+repeat 5
+  focus next
+  sleep 300
+end
+
+scroll forward
+sleep 500
+scroll backward
+
+# Prints the whole screen into the script's output.
+screen

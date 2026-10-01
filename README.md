@@ -1,6 +1,7 @@
 # Scrobot
 
-An Android app that lets Claude Code, running in Termux on the same phone, control the screen.
+An Android app that lets Claude Code, running in Termux on the same phone, control the screen —
+and that runs imported scripts on its own.
 It needs no adb, Wi-Fi, root, Tasker or AutoInput. The app uses Android's **Accessibility**
 permission and exposes a small **HTTP API on `127.0.0.1:8765`**. Requests need an `X-Token` header.
 
@@ -11,12 +12,14 @@ permission and exposes a small **HTTP API on `127.0.0.1:8765`**. Requests need a
 
 | Path | What |
 |---|---|
-| `app/src/main/java/com/mahmoud/scrobot/` | `HandsService` (accessibility service, owns the server), `Api` (endpoints), `Nodes` (window/node search), `HttpServer` + `Router` (hand-written HTTP server, token check), `MainActivity`, `KeepAliveService` (foreground notification), `StopReceiver`, `Prefs`, `ApiLog` |
+| `app/src/main/java/com/mahmoud/scrobot/` | `HandsService` (accessibility service, owns everything below), `Api` (endpoints), `Nodes` (window/node search), `HttpServer` + `Router` (hand-written HTTP server, token check), `MainActivity`, `KeepAliveService` (foreground notification), `StopReceiver`, `Prefs`, `ApiLog` |
+| …`ScriptStore` `ScriptParser` `ActionInterpreter` `ScriptRunner` `JsRunner` `ShellRunner` | version 2: imported scripts — the scripts folder, the action language, its interpreter, and the JavaScript and shell engines |
+| `examples/` | scripts to import and try |
 | `app/src/main/res/xml/accessibility_service_config.xml` | gestures, window content, screenshots, `flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews`, all event types |
 | `client/hands` | Bash client for Termux / proot Ubuntu |
 | `keystore/scrobot-release.jks.gpg` | The release signing key, encrypted (AES-256). The password is only in the `KEYSTORE_PASSWORD` GitHub secret. Every future version must be signed with this key to install over the old one. |
 | `tools/build-offline.sh` | Builds the signed APK without the Android Gradle Plugin (this is how the release APK was made) |
-| `tools/jvmtest/`, `tools/test-client.sh` | Runs the real `HttpServer` + `Router` on a JVM with stub endpoints and tests `hands` against it |
+| `tools/jvmtest/`, `tools/test-client.sh` | Runs the real `HttpServer`, `Router`, `ScriptParser` and `ActionInterpreter` on a JVM: 135 checks of the script language and the `hands` client. `scrobot-jvmtest parse FILE` also checks a script without a phone. |
 
 ## Download the latest APK
 
@@ -52,7 +55,7 @@ Each reply is `{"ok":true,...}`, or `{"ok":false,"error":"..."}` with a non-200 
 
 | Endpoint | Body | Result |
 |---|---|---|
-| `GET /ping` | – | `{"ok":true,"version":"1.0"}` |
+| `GET /ping` | – | `{"ok":true,"version":"2.0"}` |
 | `GET /screen` | `?all=1`, `?format=text` | `windows` (id, title, package, type, layer, active, bounds) and `nodes`: `text desc hint id class package bounds center clickable editable focused checked enabled window window_id`. By default only visible nodes that have text, desc, hint or id. Reads **every window** (both halves of split screen, dialogs, keyboard). |
 | `/tap` | `{"x":540,"y":1200}` | 60 ms tap. Waits for the gesture to finish. |
 | `/longpress` | `{"x":..,"y":..,"ms":800}` | long press |
@@ -64,12 +67,113 @@ Each reply is `{"ok":true,...}`, or `{"ok":false,"error":"..."}` with a non-200 
 | `/wait` | `{"text":"Chats","timeout":8000}` (or `id`/`desc`, `"gone":true`) | Polls until the node appears or disappears. Returns the node, or a 408 timeout. |
 | `/screenshot` | optional `format` (`png`/`jpg`), `quality`, `scale` (0–1), `raw=1` | `{"png":"<base64>","width":..,"height":..}`. With `raw=1` the reply is the image bytes. Needs Android 11+. |
 | `/clipboard` | `{"text":".."}` sets it; `{}` reads it | Android lets only the focused app or keyboard read the clipboard, so reading may return `null`. |
+| `/find` | the same selectors as `/click` | `{"found":true,"node":{...}}`. Never fails when nothing matches. |
+| `/focus` | `{"direction":"next"}` — `next previous up down left right first last`, or a selector | Moves input focus, which is what pressing Tab does. Walks the focusable nodes in reading order; the directional names pick the nearest node that way. |
+| `/scroll` | `{"direction":"forward"}` — `forward backward up down left right`, optional selector | Scrolls the biggest scrollable list on screen (or the one you select). Falls back to a swipe if nothing reports itself scrollable. |
+| `/sleep` | `{"ms":500}` | Waits inside the app, for scripts. |
+| `GET /scripts` | – | The imported scripts and the folder they live in. |
+| `/script/run` | `{"name":"login.scro"}` or `{"source":"tap 1 2","kind":"actions"}`, optional `args` (strings), `timeout` (ms), `background`, `format:"text"` | Runs a script. Waits for it unless `background`. Returns the output, how long it took, and `status`. One script runs at a time; a second one gets 409. |
+| `/script/status` | optional `format:"text"` | The running (or last) script and its output so far. |
+| `/script/stop` | – | Stops the running script. |
+| `/script/import` | `{"name":"login.scro","source":"..."}` | Saves a script. |
+| `/script/check` | `{"name":...}` or `{"source":...}` | Parses an action or JSON script without running it, and names the first mistake. |
+| `/script/read`, `/script/delete` | `{"name":...}` | Read or delete a script. |
 
 ```bash
 T=$(cat ~/.config/scrobot/token)
 curl -s -H "X-Token: $T" 127.0.0.1:8765/ping
 curl -s -H "X-Token: $T" -d '{"text":"Send"}' 127.0.0.1:8765/click
 ```
+
+## Scripts
+
+Version 2 imports and runs scripts. Nothing is written by hand on the phone: import a file from the
+app (**Import script…**) or with `hands import file`, then run it from the app's **Run** button, with
+`hands run`, or through `/script/run`. Scripts live in
+`/sdcard/Android/data/com.mahmoud.scrobot/files/scripts` and the kind is decided by the extension.
+
+Scripts run with the app's own permissions, one at a time, with a 2-minute limit by default
+(`timeout`). **Stop** in the app, `hands stop` and the notification's Stop button all end a run.
+
+### `.scro` — action scripts
+
+One command per line, `#` comments, `"quoted arguments"` with `\n` and `\"` escapes, and `$1`…`$9`
+for the arguments passed to the run. Anything the API can do, a line can do.
+
+```
+open com.whatsapp
+wait "Chats" 10000
+click "Ask Meta AI or Search"
+type "$1"
+sleep 800
+
+if-missing "$1"
+  echo "no chat called $1"
+  stop
+end
+
+click "$1"
+type "$2" "Type a message"
+click-id com.whatsapp:id/send
+```
+
+| Commands | |
+|---|---|
+| screen | `tap X Y` · `longpress X Y [ms]` · `swipe X1 Y1 X2 Y2 [ms]` · `click "TEXT" [index]` · `click-id ID` · `click-desc "DESC"` · `type "TEXT" ["FIELD"]` · `append "TEXT" ["FIELD"]` |
+| moving about | `key back` · `open com.whatsapp` · `open https://…` · `focus next` · `scroll forward` · `wait "TEXT" [ms]` · `wait-gone "TEXT" [ms]` · `sleep MS` |
+| output | `screen [all]` · `shot name.png` · `clip "TEXT"` · `echo "..."` |
+| control | `repeat N … end` · `if-found "TEXT" … else … end` · `if-missing "TEXT" … end` · `set name "value"` · `stop` |
+
+Any command also takes `key=value` extras that go straight into the request
+(`click text="Send" exact=true index=1`), and `/endpoint key=value` calls an endpoint by name, so
+nothing in the API is out of reach. `hands check NAME` parses a script and names the first mistake
+without running it.
+
+### `.json` — the same steps as JSON
+
+```json
+{ "steps": [
+  { "action": "open", "package": "com.whatsapp" },
+  { "action": "wait", "text": "Chats", "timeout": 8000 },
+  { "action": "tap", "x": 540, "y": 1200 }
+] }
+```
+
+### `.js` — JavaScript
+
+Runs in an off-screen WebView with a `scrobot` object; no network access is involved. `async`/`await`
+works, `console.log` goes to the run's output, and throwing fails the run.
+
+```js
+const nodes = scrobot.screen();                       // every node, as objects
+scrobot.log('nodes: ' + nodes.length);
+if (scrobot.find('Send').found) scrobot.click('Send');
+scrobot.type('Hello 👋', 'Message');
+scrobot.sleep(500);
+```
+
+`scrobot.call(endpoint, args)` reaches any endpoint; `scrobot.args` holds the run's arguments. The
+shorthands are `screen find tap longpress swipe click type append key open wait waitGone focus
+scroll shot clipboard sleep log stopped`.
+
+### `.sh` — shell
+
+Android's shell is **mksh**, not bash, and it has no `curl` or `wget`. So scripts get a `scrobot`
+shell function that talks to the app directly (through small files, no network tool needed):
+
+```sh
+scrobot shot "screen.png"
+scrobot screen > "$SCROBOT_SHOTS/screen.txt"       # one node per line
+scrobot click "Send" || echo "no Send button"      # exit status follows the API
+scrobot type "Hello" field="Message"
+scrobot --json /tap '{"x":540,"y":1200}'
+scrobot log "a line for the app's log"
+```
+
+`$SCROBOT_SHOTS`, `$SCROBOT_SCRIPTS`, `$SCROBOT_TOKEN` and `$SCROBOT_URL` are set, `$1`… are the
+run's arguments, stdout and stderr become the run's output, and a non-zero exit fails the run.
+Android does not let an app execute files it wrote, so the script is read by `sh` rather than
+executed, and `scrobot` is a shell function: it is not inherited by a `sh -c` sub-shell.
 
 ## The `hands` client
 
@@ -114,7 +218,9 @@ from reading `Android/data`**, so plan on `hands set-token`.
 5. **Battery.** In the app tap **Ignore battery optimisations** → Allow. On Samsung, also open
    Settings → Battery → Background usage limits and make sure Scrobot is not in *Sleeping* or
    *Deep sleeping* apps. You can add it to *Never auto sleeping apps*.
-6. **Install `hands` in Termux.** Copy `hands` to Downloads, then in Termux:
+6. **Try a script.** Copy a file from `examples/` to the phone, tap **Import script…** in the app,
+   then **Run**. `examples/tab-through.scro` is safe to try anywhere.
+7. **Install `hands` in Termux.** Copy `hands` to Downloads, then in Termux:
    ```bash
    termux-setup-storage                       # once, to reach /sdcard
    cp /sdcard/Download/hands $PREFIX/bin/hands && chmod +x $PREFIX/bin/hands

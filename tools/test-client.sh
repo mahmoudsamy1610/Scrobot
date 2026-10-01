@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Starts the JVM stub server (tools/jvmtest) and checks the HTTP layer and the `hands` client.
+# Checks the script language (ParserTest) and then the HTTP layer and the `hands` client against
+# the JVM stub server (tools/jvmtest).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT=18765
@@ -14,13 +15,15 @@ check() { # name, command..., expects success and stdout matching $EXPECT
   else echo "FAIL  $name (rc=$rc)"; echo "$out" | head -5; fails=$((fails+1)); fi
 }
 
-"$ROOT/tools/jvmtest/build/install/scrobot-jvmtest/bin/scrobot-jvmtest" "$TOKEN" "$PORT" 2>/tmp/stub.log &
+STUB_BIN="$ROOT/tools/jvmtest/build/install/scrobot-jvmtest/bin/scrobot-jvmtest"
+"$STUB_BIN" test || fails=$((fails + 1))
+"$STUB_BIN" "$TOKEN" "$PORT" 2>/tmp/stub.log &
 STUB=$!
 trap 'kill $STUB 2>/dev/null' EXIT
 for _ in $(seq 50); do curl -s "$HANDS_URL/ping" >/dev/null && break; sleep 0.2; done
 
 EXPECT='"ok":true' check "ping" "$HANDS" ping
-EXPECT='"version":"1.0"' check "ping version" "$HANDS" ping
+EXPECT='"version":"2.0"' check "ping version" "$HANDS" ping
 RC=1 EXPECT='"ok":false' check "no token -> ok:false" env HANDS_TOKEN=wrong "$HANDS" ping
 EXPECT='401' check "no token -> 401" curl -s -o /dev/null -w '%{http_code}' "$HANDS_URL/ping"
 EXPECT='401' check "wrong token -> 401" curl -s -o /dev/null -w '%{http_code}' -H 'X-Token: nope' "$HANDS_URL/ping"
@@ -65,5 +68,30 @@ if command -v ss >/dev/null; then
     echo "FAIL  bound to 127.0.0.1 only: ${addrs:-not listening}"; fails=$((fails+1))
   fi
 fi
+
+# --- v2: navigation and scripts
+EXPECT='"direction":"next"' check "focus default" "$HANDS" focus
+EXPECT='"direction":"up"' check "focus direction" "$HANDS" focus up
+EXPECT='"direction":"backward"' check "scroll" "$HANDS" scroll backward
+EXPECT='"text":"Chats"' check "scroll inside a list" "$HANDS" scroll forward "Chats"
+EXPECT='"ms":250' check "sleep" "$HANDS" sleep 250
+EXPECT='"text":"Send"' check "find" "$HANDS" find Send
+EXPECT='login.scro' check "scripts list" "$HANDS" scripts
+printf 'tap 1 2\nclick "Send"\n' > /tmp/hands-test.scro
+EXPECT='"name":"hands-test.scro"' check "import sends the name" "$HANDS" import /tmp/hands-test.scro
+EXPECT='"checked":true' check "check" "$HANDS" check login.scro
+EXPECT='"source":"tap 1 2\nclick \"Send\""' check "import sends the text" "$HANDS" import /tmp/hands-test.scro
+EXPECT='"name":"other.scro"' check "import under another name" "$HANDS" import /tmp/hands-test.scro other.scro
+RC=2 EXPECT='cannot read' check "import of a missing file" "$HANDS" import /tmp/does-not-exist
+EXPECT='"args":["a","b c"]' check "run passes arguments" "$HANDS" run login a "b c"
+EXPECT='"format":"text"' check "run asks for text output" "$HANDS" run login
+EXPECT='"background":true' check "run-bg is background" "$HANDS" run-bg login
+EXPECT='"background":false' check "run waits" "$HANDS" run login
+EXPECT='"status":"idle"' check "script-status" "$HANDS" script-status
+EXPECT='"ok":true' check "stop" "$HANDS" stop
+EXPECT='"checked":true' check "check" "$HANDS" check login.scro
+EXPECT='"source":"tap 1 2' check "show prints the script" "$HANDS" show login.scro
+EXPECT='"name":"login.scro"' check "rm" "$HANDS" rm login.scro
+
 echo "failures: $fails"
 exit $fails

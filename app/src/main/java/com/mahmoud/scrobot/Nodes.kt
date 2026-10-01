@@ -167,6 +167,54 @@ object Nodes {
         return out
     }
 
+    /** Visible nodes that can take input focus, in the order /focus walks them. */
+    fun focusable(service: AccessibilityService): List<Found> {
+        val out = ArrayList<Found>()
+        for (win in searchOrder(windows(service))) {
+            if (win.type == "input_method") continue
+            walk(win.root) { node ->
+                if (node.isVisibleToUser && node.isEnabled && (node.isFocusable || node.isEditable)) {
+                    out.add(Found(node, win))
+                }
+                true
+            }
+        }
+        // Reading order: top to bottom, then left to right.
+        return out.sortedWith(compareBy({ center(it.node)[1] }, { center(it.node)[0] }))
+    }
+
+    /** The biggest scrollable node on screen, which is almost always the list the user means. */
+    fun largestScrollable(service: AccessibilityService): Found? {
+        var best: Found? = null
+        var bestArea = 0L
+        for (win in searchOrder(windows(service))) {
+            walk(win.root) { node ->
+                if (node.isScrollable && node.isVisibleToUser) {
+                    val r = Rect()
+                    node.getBoundsInScreen(r)
+                    val area = r.width().toLong() * r.height().toLong()
+                    if (area > bestArea) {
+                        bestArea = area
+                        best = Found(node, win)
+                    }
+                }
+                true
+            }
+        }
+        return best
+    }
+
+    fun screenBounds(service: AccessibilityService): Rect {
+        val wins = windows(service)
+        val bounds = Rect()
+        for (win in wins) bounds.union(win.bounds)
+        if (bounds.isEmpty) {
+            val metrics = service.resources.displayMetrics
+            bounds.set(0, 0, metrics.widthPixels, metrics.heightPixels)
+        }
+        return bounds
+    }
+
     fun find(service: AccessibilityService, sel: Selector): Found? =
         findAll(service, sel, sel.index + 1).getOrNull(sel.index)
 
