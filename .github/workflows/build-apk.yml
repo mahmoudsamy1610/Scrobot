@@ -49,7 +49,7 @@ jobs:
       - name: Cache Android framework jars
         uses: actions/cache@v4
         with:
-          path: ~/.cache/claude-hands-sdk
+          path: ~/.cache/scrobot-sdk
           key: android-all-16-robolectric-13921718-14-robolectric-10818077
 
       - name: Test HTTP server and hands client
@@ -59,7 +59,7 @@ jobs:
 
       - name: Build and sign APK
         env:
-          # Repository secret: unlocks keystore/claude-hands-release.jks.gpg (and is the keystore password).
+          # Repository secret: unlocks keystore/scrobot-release.jks.gpg (and is the keystore password).
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_PASSWORD" ]; then
@@ -73,7 +73,7 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: claude-hands-${{ env.VERSION_NAME }}
+          name: scrobot-${{ env.VERSION_NAME }}
           path: |
             scrobot.apk
             hands

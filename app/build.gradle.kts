@@ -6,7 +6,7 @@ plugins {
 }
 
 // Same keystore as tools/build-offline.sh, so either build installs over the other.
-// Decrypt it once with: gpg -d keystore/claude-hands-release.jks.gpg > keystore/claude-hands-release.jks
+// Decrypt it once with: gpg -d keystore/scrobot-release.jks.gpg > keystore/scrobot-release.jks
 // and put the password in keystore/keystore.properties (both are git-ignored).
 val keystoreProps = Properties().apply {
     val f = rootProject.file("keystore/keystore.properties")
@@ -14,11 +14,11 @@ val keystoreProps = Properties().apply {
 }
 
 android {
-    namespace = "com.mahmoud.claudehands"
+    namespace = "com.mahmoud.scrobot"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.mahmoud.claudehands"
+        applicationId = "com.mahmoud.scrobot"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

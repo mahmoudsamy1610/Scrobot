@@ -11,4 +11,4 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "claude-hands-jvmtest"
+rootProject.name = "scrobot-jvmtest"

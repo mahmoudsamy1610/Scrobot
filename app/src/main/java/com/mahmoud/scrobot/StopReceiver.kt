@@ -1,4 +1,4 @@
-package com.mahmoud.claudehands
+package com.mahmoud.scrobot
 
 import android.content.BroadcastReceiver
 import android.content.Context

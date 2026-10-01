@@ -1,4 +1,4 @@
-package com.mahmoud.claudehands
+package com.mahmoud.scrobot
 
 import android.app.Notification
 import android.app.NotificationChannel

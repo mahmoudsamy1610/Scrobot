@@ -1,4 +1,4 @@
-package com.mahmoud.claudehands
+package com.mahmoud.scrobot
 
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque

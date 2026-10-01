@@ -4,15 +4,15 @@
 #
 # Token lookup order:
 #   1. $HANDS_TOKEN
-#   2. ~/.config/claude-hands/token        (written by `hands set-token`)
-#   3. /sdcard/Android/data/com.mahmoud.claudehands/files/token.txt
+#   2. ~/.config/scrobot/token        (written by `hands set-token`)
+#   3. /sdcard/Android/data/com.mahmoud.scrobot/files/token.txt
 #
 # In split screen, HANDS_PKG=com.whatsapp limits click/type/wait to that app.
 set -u
 
 HANDS_URL="${HANDS_URL:-http://127.0.0.1:8765}"
-TOKEN_FILE_LOCAL="${HOME}/.config/claude-hands/token"
-TOKEN_FILE_APP="/sdcard/Android/data/com.mahmoud.claudehands/files/token.txt"
+TOKEN_FILE_LOCAL="${HOME}/.config/scrobot/token"
+TOKEN_FILE_APP="/sdcard/Android/data/com.mahmoud.scrobot/files/token.txt"
 
 usage() {
   cat <<'EOF'
@@ -38,7 +38,7 @@ usage: hands COMMAND [ARGS]
   shot FILE.png                 save a screenshot
   clip [TEXT]                   set the clipboard, or print it
   (env HANDS_PKG=PACKAGE limits click/type/wait to one app, useful in split screen)
-  set-token TOKEN               save the token to ~/.config/claude-hands/token
+  set-token TOKEN               save the token to ~/.config/scrobot/token
   raw ENDPOINT [JSON]           POST any JSON to any endpoint, e.g. hands raw /tap '{"x":1,"y":2}'
 
 Exit status is 0 when the app answered {"ok":true}, 1 otherwise.

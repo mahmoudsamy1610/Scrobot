@@ -1,4 +1,4 @@
-package com.mahmoud.claudehands
+package com.mahmoud.scrobot
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent

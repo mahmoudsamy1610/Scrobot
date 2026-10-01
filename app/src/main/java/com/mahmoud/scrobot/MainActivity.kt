@@ -1,4 +1,4 @@
-package com.mahmoud.claudehands
+package com.mahmoud.scrobot
 
 import android.Manifest
 import android.app.Activity

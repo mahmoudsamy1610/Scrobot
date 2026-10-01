@@ -11,7 +11,7 @@
 #   sudo apt-get install aapt apksigner zipalign dalvik-exchange
 #   tools/build-offline.sh
 #
-# Signing: env KEYSTORE_PASSWORD (decrypts keystore/claude-hands-release.jks.gpg), or a local,
+# Signing: env KEYSTORE_PASSWORD (decrypts keystore/scrobot-release.jks.gpg), or a local,
 # git-ignored keystore/keystore.properties (storeFile, storePassword, keyAlias, keyPassword).
 set -euo pipefail
 
@@ -20,11 +20,11 @@ VERSION_NAME="${VERSION_NAME:-1.0}"   # CI overrides both
 VERSION_CODE="${VERSION_CODE:-1}"
 MIN_SDK=26
 TARGET_SDK=36
-PACKAGE="com.mahmoud.claudehands"
+PACKAGE="com.mahmoud.scrobot"
 ANDROID_ALL_VERSION="16-robolectric-13921718"   # compile classpath (API 36)
 ANDROID_RES_VERSION="14-robolectric-10818077"   # framework resources for aapt2 (API 34)
 
-SDK_DIR="${SDK_DIR:-$HOME/.cache/claude-hands-sdk}"
+SDK_DIR="${SDK_DIR:-$HOME/.cache/scrobot-sdk}"
 BUILD="$ROOT/app/build/offline"
 OUT="$ROOT/app/build/outputs/apk/release"
 DX="${DX:-$(command -v dx || echo /usr/lib/android-sdk/build-tools/debian/dx)}"
@@ -61,7 +61,7 @@ echo "== kotlin"
 "${GRADLE:-gradle}" -q -p "$ROOT/tools/offline" --no-daemon \
   -PandroidJar="$ANDROID_JAR" -PgenDir="$BUILD/gen" \
   clean jar copyRuntime
-APP_JAR="$ROOT/tools/offline/build/libs/claude-hands-offline.jar"
+APP_JAR="$ROOT/tools/offline/build/libs/scrobot-offline.jar"
 mkdir -p "$BUILD/libs"
 for jar in "$ROOT"/tools/offline/build/runtime/*.jar; do
   # dx predates Java 9: drop module-info and multi-release classes.
@@ -81,7 +81,7 @@ cp "$BUILD/resources.apk" "$BUILD/unsigned.apk"
 zipalign -f -p 4 "$BUILD/unsigned.apk" "$BUILD/aligned.apk"
 
 echo "== sign"
-# CI: KEYSTORE_PASSWORD comes from a GitHub secret and unlocks keystore/claude-hands-release.jks.gpg.
+# CI: KEYSTORE_PASSWORD comes from a GitHub secret and unlocks keystore/scrobot-release.jks.gpg.
 # Locally: keystore/keystore.properties (git-ignored) next to the decrypted .jks.
 PROPS="$ROOT/keystore/keystore.properties"
 prop() { grep -E "^$1=" "$PROPS" | head -1 | cut -d= -f2-; }
@@ -93,11 +93,11 @@ if [ -z "${KEYSTORE_PASSWORD:-}" ] && [ -f "$PROPS" ]; then
 fi
 [ -n "${KEYSTORE_PASSWORD:-}" ] || { echo "no signing password: set KEYSTORE_PASSWORD or create $PROPS" >&2; exit 1; }
 export KEYSTORE_PASSWORD
-KEYSTORE_FILE="${KEYSTORE_FILE:-$ROOT/keystore/claude-hands-release.jks}"
+KEYSTORE_FILE="${KEYSTORE_FILE:-$ROOT/keystore/scrobot-release.jks}"
 if [ ! -f "$KEYSTORE_FILE" ]; then
   KEYSTORE_FILE="$BUILD/release.jks"
   printf '%s' "$KEYSTORE_PASSWORD" | gpg --batch --yes --quiet --pinentry-mode loopback --passphrase-fd 0 \
-    -o "$KEYSTORE_FILE" -d "$ROOT/keystore/claude-hands-release.jks.gpg"
+    -o "$KEYSTORE_FILE" -d "$ROOT/keystore/scrobot-release.jks.gpg"
 fi
 APK="$OUT/scrobot-$VERSION_NAME.apk"
 apksigner sign \

@@ -1,4 +1,4 @@
-package com.mahmoud.claudehands
+package com.mahmoud.scrobot
 
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream

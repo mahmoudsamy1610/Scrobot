@@ -1,4 +1,4 @@
-package com.mahmoud.claudehands
+package com.mahmoud.scrobot
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -7,7 +7,7 @@ import java.io.File
 import java.security.SecureRandom
 
 object Prefs {
-    private const val FILE = "claude_hands"
+    private const val FILE = "scrobot"
     private const val KEY_TOKEN = "token"
     private const val KEY_API_ENABLED = "api_enabled"
     private const val TOKEN_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -63,7 +63,7 @@ object Prefs {
             file.parentFile?.mkdirs()
             file.writeText(token + "\n")
         } catch (e: Exception) {
-            Log.w("ClaudeHands", "could not write token file", e)
+            Log.w("Scrobot", "could not write token file", e)
         }
     }
 

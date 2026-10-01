@@ -4,17 +4,17 @@ An Android app that lets Claude Code, running in Termux on the same phone, contr
 It needs no adb, Wi-Fi, root, Tasker or AutoInput. The app uses Android's **Accessibility**
 permission and exposes a small **HTTP API on `127.0.0.1:8765`**. Requests need an `X-Token` header.
 
-- Package: `com.mahmoud.claudehands`. minSdk 26, targetSdk 36 (Android 16). Kotlin, no libraries.
+- Package: `com.mahmoud.scrobot`. minSdk 26, targetSdk 36 (Android 16). Kotlin, no libraries.
 - No Google Play services, no analytics. The only network use is the loopback server.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `app/src/main/java/com/mahmoud/claudehands/` | `HandsService` (accessibility service, owns the server), `Api` (endpoints), `Nodes` (window/node search), `HttpServer` + `Router` (hand-written HTTP server, token check), `MainActivity`, `KeepAliveService` (foreground notification), `StopReceiver`, `Prefs`, `ApiLog` |
+| `app/src/main/java/com/mahmoud/scrobot/` | `HandsService` (accessibility service, owns the server), `Api` (endpoints), `Nodes` (window/node search), `HttpServer` + `Router` (hand-written HTTP server, token check), `MainActivity`, `KeepAliveService` (foreground notification), `StopReceiver`, `Prefs`, `ApiLog` |
 | `app/src/main/res/xml/accessibility_service_config.xml` | gestures, window content, screenshots, `flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews`, all event types |
 | `client/hands` | Bash client for Termux / proot Ubuntu |
-| `keystore/claude-hands-release.jks.gpg` | The release signing key, encrypted (AES-256). The password is only in the `KEYSTORE_PASSWORD` GitHub secret. Every future version must be signed with this key to install over the old one. |
+| `keystore/scrobot-release.jks.gpg` | The release signing key, encrypted (AES-256). The password is only in the `KEYSTORE_PASSWORD` GitHub secret. Every future version must be signed with this key to install over the old one. |
 | `tools/build-offline.sh` | Builds the signed APK without the Android Gradle Plugin (this is how the release APK was made) |
 | `tools/jvmtest/`, `tools/test-client.sh` | Runs the real `HttpServer` + `Router` on a JVM with stub endpoints and tests `hands` against it |
 
@@ -32,8 +32,8 @@ CI signs with the encrypted key in `keystore/`, unlocked by the repository secre
 
 ## Building
 
-- **Signing key:** decrypt it once with `gpg -d keystore/claude-hands-release.jks.gpg > keystore/claude-hands-release.jks`
-  (the password is the `KEYSTORE_PASSWORD` secret). Then write `keystore/keystore.properties` with `storeFile=claude-hands-release.jks`,
+- **Signing key:** decrypt it once with `gpg -d keystore/scrobot-release.jks.gpg > keystore/scrobot-release.jks`
+  (the password is the `KEYSTORE_PASSWORD` secret). Then write `keystore/keystore.properties` with `storeFile=scrobot-release.jks`,
   `storePassword=…`, `keyAlias=claudehands`, `keyPassword=…` (same password). Both files are git-ignored. Alternatively,
   `KEYSTORE_PASSWORD=… tools/build-offline.sh` decrypts the key on the fly.
 - **Android Studio / SDK:** `./gradlew assembleRelease`. The output is `app/build/outputs/apk/release/app-release.apk`.
@@ -66,7 +66,7 @@ Each reply is `{"ok":true,...}`, or `{"ok":false,"error":"..."}` with a non-200 
 | `/clipboard` | `{"text":".."}` sets it; `{}` reads it | Android lets only the focused app or keyboard read the clipboard, so reading may return `null`. |
 
 ```bash
-T=$(cat ~/.config/claude-hands/token)
+T=$(cat ~/.config/scrobot/token)
 curl -s -H "X-Token: $T" 127.0.0.1:8765/ping
 curl -s -H "X-Token: $T" -d '{"text":"Send"}' 127.0.0.1:8765/click
 ```
@@ -93,8 +93,8 @@ hands set-token TOKEN
 In split screen, set `HANDS_PKG=com.whatsapp` to limit `click`/`type`/`wait` to one app.
 The exit status is 0 when the app replied `"ok":true`.
 
-The client looks for the token in this order: `$HANDS_TOKEN`, then `~/.config/claude-hands/token`
-(written by `hands set-token`), then `/sdcard/Android/data/com.mahmoud.claudehands/files/token.txt`.
+The client looks for the token in this order: `$HANDS_TOKEN`, then `~/.config/scrobot/token`
+(written by `hands set-token`), then `/sdcard/Android/data/com.mahmoud.scrobot/files/token.txt`.
 The app writes that last file, but **Android 11 and later block other apps (Termux included)
 from reading `Android/data`**, so plan on `hands set-token`.
 

@@ -16,5 +16,5 @@ dependencies {
 }
 
 application {
-    mainClass.set("com.mahmoud.claudehands.StubServerKt")
+    mainClass.set("com.mahmoud.scrobot.StubServerKt")
 }

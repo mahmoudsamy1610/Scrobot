@@ -11,4 +11,4 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "claude-hands-offline"
+rootProject.name = "scrobot-offline"

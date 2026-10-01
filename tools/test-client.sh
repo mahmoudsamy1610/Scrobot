@@ -14,7 +14,7 @@ check() { # name, command..., expects success and stdout matching $EXPECT
   else echo "FAIL  $name (rc=$rc)"; echo "$out" | head -5; fails=$((fails+1)); fi
 }
 
-"$ROOT/tools/jvmtest/build/install/claude-hands-jvmtest/bin/claude-hands-jvmtest" "$TOKEN" "$PORT" 2>/tmp/stub.log &
+"$ROOT/tools/jvmtest/build/install/scrobot-jvmtest/bin/scrobot-jvmtest" "$TOKEN" "$PORT" 2>/tmp/stub.log &
 STUB=$!
 trap 'kill $STUB 2>/dev/null' EXIT
 for _ in $(seq 50); do curl -s "$HANDS_URL/ping" >/dev/null && break; sleep 0.2; done
