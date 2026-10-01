@@ -49,7 +49,7 @@ class KeepAliveService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_hand)
+            .setSmallIcon(R.drawable.ic_robot)
             .setContentTitle("Scrobot is running")
             .setContentText("Local API on 127.0.0.1:${Prefs.PORT}")
             .setOngoing(true)
