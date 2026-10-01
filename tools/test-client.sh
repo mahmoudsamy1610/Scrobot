@@ -58,8 +58,12 @@ EXPECT='400' check "invalid JSON -> 400" curl -s -o /dev/null -w '%{http_code}' 
 # The server must only listen on loopback.
 if command -v ss >/dev/null; then
   # Accept 127.0.0.1:PORT and the IPv4-mapped form [::ffff:127.0.0.1]:PORT; anything else is a wildcard bind.
-  EXPECT="loopback-only" check "bound to 127.0.0.1 only" sh -c \
-    "ss -ltn | grep ':$PORT ' | awk '{print \$4}' | grep -qvE '^(\[::ffff:)?127\.0\.0\.1\]?:$PORT\$' && echo wildcard || echo loopback-only"
+  addrs=$(ss -ltn | awk -v p=":$PORT" '$4 ~ p"$" {print $4}')
+  if [ -n "$addrs" ] && ! printf '%s\n' "$addrs" | grep -qvE "^(\[::ffff:)?127\.0\.0\.1\]?:$PORT\$"; then
+    echo "PASS  bound to 127.0.0.1 only"
+  else
+    echo "FAIL  bound to 127.0.0.1 only: ${addrs:-not listening}"; fails=$((fails+1))
+  fi
 fi
 echo "failures: $fails"
 exit $fails
