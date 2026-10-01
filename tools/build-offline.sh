@@ -11,7 +11,8 @@
 #   sudo apt-get install aapt apksigner zipalign dalvik-exchange
 #   tools/build-offline.sh
 #
-# Signing: keystore/keystore.properties (storeFile, storePassword, keyAlias, keyPassword).
+# Signing: env KEYSTORE_PASSWORD (decrypts keystore/claude-hands-release.jks.gpg), or a local,
+# git-ignored keystore/keystore.properties (storeFile, storePassword, keyAlias, keyPassword).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -80,15 +81,31 @@ cp "$BUILD/resources.apk" "$BUILD/unsigned.apk"
 zipalign -f -p 4 "$BUILD/unsigned.apk" "$BUILD/aligned.apk"
 
 echo "== sign"
+# CI: KEYSTORE_PASSWORD comes from a GitHub secret and unlocks keystore/claude-hands-release.jks.gpg.
+# Locally: keystore/keystore.properties (git-ignored) next to the decrypted .jks.
 PROPS="$ROOT/keystore/keystore.properties"
 prop() { grep -E "^$1=" "$PROPS" | head -1 | cut -d= -f2-; }
-STORE_FILE="$ROOT/keystore/$(prop storeFile)"
+KEY_ALIAS="${KEY_ALIAS:-claudehands}"
+if [ -z "${KEYSTORE_PASSWORD:-}" ] && [ -f "$PROPS" ]; then
+  KEYSTORE_PASSWORD="$(prop storePassword)"
+  KEY_ALIAS="$(prop keyAlias)"
+  KEYSTORE_FILE="${KEYSTORE_FILE:-$ROOT/keystore/$(prop storeFile)}"
+fi
+[ -n "${KEYSTORE_PASSWORD:-}" ] || { echo "no signing password: set KEYSTORE_PASSWORD or create $PROPS" >&2; exit 1; }
+export KEYSTORE_PASSWORD
+KEYSTORE_FILE="${KEYSTORE_FILE:-$ROOT/keystore/claude-hands-release.jks}"
+if [ ! -f "$KEYSTORE_FILE" ]; then
+  KEYSTORE_FILE="$BUILD/release.jks"
+  printf '%s' "$KEYSTORE_PASSWORD" | gpg --batch --yes --quiet --pinentry-mode loopback --passphrase-fd 0 \
+    -o "$KEYSTORE_FILE" -d "$ROOT/keystore/claude-hands-release.jks.gpg"
+fi
 APK="$OUT/claude-hands-$VERSION_NAME.apk"
 apksigner sign \
-  --ks "$STORE_FILE" --ks-key-alias "$(prop keyAlias)" \
-  --ks-pass "pass:$(prop storePassword)" --key-pass "pass:$(prop keyPassword)" \
+  --ks "$KEYSTORE_FILE" --ks-key-alias "$KEY_ALIAS" \
+  --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEYSTORE_PASSWORD \
   --min-sdk-version "$MIN_SDK" \
   --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
   --out "$APK" "$BUILD/aligned.apk"
+rm -f "$BUILD/release.jks"
 apksigner verify --verbose --min-sdk-version "$MIN_SDK" "$APK" | head -5
 echo "== done: $APK"

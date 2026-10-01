@@ -58,7 +58,14 @@ jobs:
           tools/test-client.sh
 
       - name: Build and sign APK
+        env:
+          # Repository secret: unlocks keystore/claude-hands-release.jks.gpg (and is the keystore password).
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
+          if [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Add the KEYSTORE_PASSWORD secret: repo Settings > Secrets and variables > Actions > New repository secret"
+            exit 1
+          fi
           tools/build-offline.sh
           cp "app/build/outputs/apk/release/claude-hands-$VERSION_NAME.apk" claude-hands.apk
           cp client/hands hands

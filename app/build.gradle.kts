@@ -6,6 +6,8 @@ plugins {
 }
 
 // Same keystore as tools/build-offline.sh, so either build installs over the other.
+// Decrypt it once with: gpg -d keystore/claude-hands-release.jks.gpg > keystore/claude-hands-release.jks
+// and put the password in keystore/keystore.properties (both are git-ignored).
 val keystoreProps = Properties().apply {
     val f = rootProject.file("keystore/keystore.properties")
     if (f.exists()) f.inputStream().use { load(it) }

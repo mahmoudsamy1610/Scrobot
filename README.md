@@ -14,7 +14,7 @@ permission and exposes a small **HTTP API on `127.0.0.1:8765`**. Requests need a
 | `app/src/main/java/com/mahmoud/claudehands/` | `HandsService` (accessibility service, owns the server), `Api` (endpoints), `Nodes` (window/node search), `HttpServer` + `Router` (hand-written HTTP server, token check), `MainActivity`, `KeepAliveService` (foreground notification), `StopReceiver`, `Prefs`, `ApiLog` |
 | `app/src/main/res/xml/accessibility_service_config.xml` | gestures, window content, screenshots, `flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews`, all event types |
 | `client/hands` | Bash client for Termux / proot Ubuntu |
-| `keystore/` | Release signing key and passwords. **Keep it.** Every future version must be signed with it to install over the old one. |
+| `keystore/claude-hands-release.jks.gpg` | The release signing key, encrypted (AES-256). The password is only in the `KEYSTORE_PASSWORD` GitHub secret. Every future version must be signed with this key to install over the old one. |
 | `tools/build-offline.sh` | Builds the signed APK without the Android Gradle Plugin (this is how the release APK was made) |
 | `tools/jvmtest/`, `tools/test-client.sh` | Runs the real `HttpServer` + `Router` on a JVM with stub endpoints and tests `hands` against it |
 
@@ -27,10 +27,16 @@ and publishes a GitHub Release `v1.0.<run>` containing `claude-hands.apk` and `h
 https://github.com/mahmoudsamy1610/Scrobot/releases/latest/download/claude-hands.apk
 
 The versionCode goes up with every run, so each APK installs over the previous one.
+CI signs with the encrypted key in `keystore/`, unlocked by the repository secret `KEYSTORE_PASSWORD`
+(Settings → Secrets and variables → Actions). Without that secret the build stops before signing.
 
 ## Building
 
-- **Android Studio / SDK:** `./gradlew assembleRelease`. The output is `app/build/outputs/apk/release/app-release.apk`, signed with `keystore/`.
+- **Signing key:** decrypt it once with `gpg -d keystore/claude-hands-release.jks.gpg > keystore/claude-hands-release.jks`
+  (the password is the `KEYSTORE_PASSWORD` secret). Then write `keystore/keystore.properties` with `storeFile=claude-hands-release.jks`,
+  `storePassword=…`, `keyAlias=claudehands`, `keyPassword=…` (same password). Both files are git-ignored. Alternatively,
+  `KEYSTORE_PASSWORD=… tools/build-offline.sh` decrypts the key on the fly.
+- **Android Studio / SDK:** `./gradlew assembleRelease`. The output is `app/build/outputs/apk/release/app-release.apk`.
 - **No Android SDK:** `sudo apt-get install aapt apksigner zipalign dalvik-exchange` (Ubuntu 24.04), then
   `tools/build-offline.sh`. The output is `app/build/outputs/apk/release/claude-hands-1.0.apk`.
 - Client tests: `(cd tools/jvmtest && gradle installDist) && tools/test-client.sh`
