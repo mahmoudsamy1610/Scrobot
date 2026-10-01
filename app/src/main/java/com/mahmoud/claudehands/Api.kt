@@ -444,7 +444,7 @@ class Api(private val service: AccessibilityService) {
         }
         val out = JSONObject().put("text", text ?: JSONObject.NULL)
         if (text == null) {
-            out.put("note", "Android only lets the focused app or the keyboard read the clipboard; it may be hidden from Claude Hands")
+            out.put("note", "Android only lets the focused app or the keyboard read the clipboard; it may be hidden from Scrobot")
         }
         return out
     }
@@ -452,7 +452,7 @@ class Api(private val service: AccessibilityService) {
     private fun setClip(text: String) {
         onMain {
             val cm = service.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText("Claude Hands", text))
+            cm.setPrimaryClip(ClipData.newPlainText("Scrobot", text))
         }
     }
 

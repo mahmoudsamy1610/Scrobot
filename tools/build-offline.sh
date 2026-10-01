@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds and signs app/build/outputs/apk/release/claude-hands-<version>.apk WITHOUT the Android
+# Builds and signs app/build/outputs/apk/release/scrobot-<version>.apk WITHOUT the Android
 # Gradle Plugin or the Google SDK downloads, using only:
 #   - Ubuntu packages:  aapt2, dx (dalvik-exchange), zipalign, apksigner, a JDK, Gradle
 #   - Maven Central:    Robolectric's android-all jars (the real framework classes and
@@ -99,7 +99,7 @@ if [ ! -f "$KEYSTORE_FILE" ]; then
   printf '%s' "$KEYSTORE_PASSWORD" | gpg --batch --yes --quiet --pinentry-mode loopback --passphrase-fd 0 \
     -o "$KEYSTORE_FILE" -d "$ROOT/keystore/claude-hands-release.jks.gpg"
 fi
-APK="$OUT/claude-hands-$VERSION_NAME.apk"
+APK="$OUT/scrobot-$VERSION_NAME.apk"
 apksigner sign \
   --ks "$KEYSTORE_FILE" --ks-key-alias "$KEY_ALIAS" \
   --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEYSTORE_PASSWORD \

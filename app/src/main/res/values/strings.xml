@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Claude Hands</string>
-    <string name="service_label">Claude Hands</string>
+    <string name="app_name">Scrobot</string>
+    <string name="service_label">Scrobot</string>
     <string name="service_summary">Local API on 127.0.0.1:8765 that lets Claude in Termux tap, type and read the screen.</string>
-    <string name="service_description">Claude Hands exposes a local-only HTTP API (127.0.0.1:8765, protected by a token) so that scripts running on this phone, such as Claude Code in Termux, can read what is on screen, tap, swipe, type text, press system keys, open apps and take screenshots. Nothing is sent off the device and the app has no internet access other than this local socket.</string>
+    <string name="service_description">Scrobot exposes a local-only HTTP API (127.0.0.1:8765, protected by a token) so that scripts running on this phone, such as Claude Code in Termux, can read what is on screen, tap, swipe, type text, press system keys, open apps and take screenshots. Nothing is sent off the device and the app has no internet access other than this local socket.</string>
 </resources>

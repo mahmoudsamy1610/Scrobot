@@ -65,7 +65,7 @@ class MainActivity : Activity() {
             service != null && service.isServerRunning -> "Service: ON\nAPI: listening on http://127.0.0.1:${Prefs.PORT}"
             service != null -> "Service: ON\nAPI: not running (see log below)"
             enabledInSettings -> "Service: switched on but not connected yet.\nTry switching it off and on again."
-            else -> "Service: OFF\nTurn on \"Claude Hands\" in Accessibility settings."
+            else -> "Service: OFF\nTurn on \"Scrobot\" in Accessibility settings."
         }
         statusView.setTextColor(if (service?.isServerRunning == true) 0xFF2E7D32.toInt() else 0xFFC62828.toInt())
         tokenView.text = Prefs.token(this)
@@ -93,7 +93,7 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
         }
 
-        column.addView(text("Claude Hands", 26f, bold = true))
+        column.addView(text("Scrobot", 26f, bold = true))
         column.addView(text("Lets Claude in Termux control this phone through a local API.", 14f))
 
         column.addView(header("Status"))
@@ -115,7 +115,7 @@ class MainActivity : Activity() {
         column.addView(row(
             button("Copy") {
                 val cm = getSystemService(ClipboardManager::class.java)
-                cm.setPrimaryClip(ClipData.newPlainText("Claude Hands token", Prefs.token(this)))
+                cm.setPrimaryClip(ClipData.newPlainText("Scrobot token", Prefs.token(this)))
                 Toast.makeText(this, "Token copied", Toast.LENGTH_SHORT).show()
             },
             button("New token") {

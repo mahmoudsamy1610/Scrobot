@@ -1,4 +1,4 @@
-# Claude Hands
+# Scrobot
 
 An Android app that lets Claude Code, running in Termux on the same phone, control the screen.
 It needs no adb, Wi-Fi, root, Tasker or AutoInput. The app uses Android's **Accessibility**
@@ -21,10 +21,10 @@ permission and exposes a small **HTTP API on `127.0.0.1:8765`**. Requests need a
 ## Download the latest APK
 
 Every push runs `.github/workflows/build-apk.yml`. It runs the client tests, builds and signs the APK,
-and publishes a GitHub Release `v1.0.<run>` containing `claude-hands.apk` and `hands`. The newest APK always has this link
+and publishes a GitHub Release `v1.0.<run>` containing `scrobot.apk` and `hands`. The newest APK always has this link
 (sign in to GitHub in the phone's browser first, because the repo is private):
 
-https://github.com/mahmoudsamy1610/Scrobot/releases/latest/download/claude-hands.apk
+https://github.com/mahmoudsamy1610/Scrobot/releases/latest/download/scrobot.apk
 
 The versionCode goes up with every run, so each APK installs over the previous one.
 CI signs with the encrypted key in `keystore/`, unlocked by the repository secret `KEYSTORE_PASSWORD`
@@ -38,7 +38,7 @@ CI signs with the encrypted key in `keystore/`, unlocked by the repository secre
   `KEYSTORE_PASSWORD=… tools/build-offline.sh` decrypts the key on the fly.
 - **Android Studio / SDK:** `./gradlew assembleRelease`. The output is `app/build/outputs/apk/release/app-release.apk`.
 - **No Android SDK:** `sudo apt-get install aapt apksigner zipalign dalvik-exchange` (Ubuntu 24.04), then
-  `tools/build-offline.sh`. The output is `app/build/outputs/apk/release/claude-hands-1.0.apk`.
+  `tools/build-offline.sh`. The output is `app/build/outputs/apk/release/scrobot-1.0.apk`.
 - Client tests: `(cd tools/jvmtest && gradle installDist) && tools/test-client.sh`
 
 When you release a new version, raise `versionCode`/`versionName` in `app/build.gradle.kts` and in `tools/build-offline.sh`.
@@ -100,19 +100,19 @@ from reading `Android/data`**, so plan on `hands set-token`.
 
 ## Install on the phone (Galaxy A56, One UI 8.5)
 
-1. **Install the APK.** Open `claude-hands-1.0.apk` from My Files or Chrome. If asked, allow
+1. **Install the APK.** Open `scrobot-1.0.apk` from My Files or Chrome. If asked, allow
    *Install unknown apps* for that app: Settings → Apps → (My Files/Chrome) → Install unknown apps.
    If Samsung **Auto Blocker** refuses the install, turn it off for the moment:
    Settings → Security and privacy → Auto Blocker.
 2. **Allow restricted settings.** Android blocks the Accessibility switch for sideloaded apps.
-   Open Settings → Accessibility → Installed apps → Claude Hands and try to turn it on. You will see
-   "Restricted setting". Then open Settings → Apps → Claude Hands (or the app's **Open App info**
+   Open Settings → Accessibility → Installed apps → Scrobot and try to turn it on. You will see
+   "Restricted setting". Then open Settings → Apps → Scrobot (or the app's **Open App info**
    button) → ⋮ (top right) → **Allow restricted settings**, and confirm with your PIN or fingerprint.
-3. **Turn on the service.** Settings → Accessibility → Installed apps → **Claude Hands** → On → Allow.
+3. **Turn on the service.** Settings → Accessibility → Installed apps → **Scrobot** → On → Allow.
    The app should now show *Service: ON*, *API: listening on http://127.0.0.1:8765*.
-4. **Allow notifications** when the app asks. This shows the "Claude Hands is running" notification.
+4. **Allow notifications** when the app asks. This shows the "Scrobot is running" notification.
 5. **Battery.** In the app tap **Ignore battery optimisations** → Allow. On Samsung, also open
-   Settings → Battery → Background usage limits and make sure Claude Hands is not in *Sleeping* or
+   Settings → Battery → Background usage limits and make sure Scrobot is not in *Sleeping* or
    *Deep sleeping* apps. You can add it to *Never auto sleeping apps*.
 6. **Install `hands` in Termux.** Copy `hands` to Downloads, then in Termux:
    ```bash

@@ -1,6 +1,6 @@
 # Builds a signed APK on every push and publishes it as a GitHub Release.
 # Newest APK, always at the same link (log in to GitHub first; the repo is private):
-#   https://github.com/mahmoudsamy1610/Scrobot/releases/latest/download/claude-hands.apk
+#   https://github.com/mahmoudsamy1610/Scrobot/releases/latest/download/scrobot.apk
 name: Build APK
 
 on:
@@ -67,7 +67,7 @@ jobs:
             exit 1
           fi
           tools/build-offline.sh
-          cp "app/build/outputs/apk/release/claude-hands-$VERSION_NAME.apk" claude-hands.apk
+          cp "app/build/outputs/apk/release/scrobot-$VERSION_NAME.apk" scrobot.apk
           cp client/hands hands
 
       - name: Upload workflow artifact
@@ -75,7 +75,7 @@ jobs:
         with:
           name: claude-hands-${{ env.VERSION_NAME }}
           path: |
-            claude-hands.apk
+            scrobot.apk
             hands
 
       - name: Publish GitHub Release
@@ -83,10 +83,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="v$VERSION_NAME"
-          gh release create "$tag" claude-hands.apk hands \
+          gh release create "$tag" scrobot.apk hands \
             --target "$GITHUB_SHA" \
-            --title "Claude Hands $VERSION_NAME (${GITHUB_REF_NAME})" \
+            --title "Scrobot $VERSION_NAME (${GITHUB_REF_NAME})" \
             --notes "Built from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}: $(git log -1 --format=%s)
 
-          Install: download claude-hands.apk on the phone and open it. It installs over the previous version." \
+          Install: download scrobot.apk on the phone and open it. It installs over the previous version." \
             --latest

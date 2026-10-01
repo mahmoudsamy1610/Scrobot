@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hands - command-line client for the Claude Hands app (local API on 127.0.0.1:8765).
+# hands - command-line client for the Scrobot app (local API on 127.0.0.1:8765).
 # Works in Termux and in Ubuntu under proot. Needs only bash and curl.
 #
 # Token lookup order:
@@ -53,7 +53,7 @@ token() {
   for f in "$TOKEN_FILE_LOCAL" "$TOKEN_FILE_APP"; do
     if [ -r "$f" ]; then tr -d ' \r\n' < "$f"; return; fi
   done
-  die "no token. Copy it from the Claude Hands app and run: hands set-token <TOKEN>"
+  die "no token. Copy it from the Scrobot app and run: hands set-token <TOKEN>"
 }
 
 # JSON string escaping in pure bash (UTF-8 such as Arabic and emoji passes through unchanged).
@@ -81,7 +81,7 @@ call() {
   if [ -n "$body" ]; then
     args+=(-H 'Content-Type: application/json; charset=utf-8' --data-binary "$body")
   fi
-  out=$(curl "${args[@]}" "$HANDS_URL$path") || { echo "hands: cannot reach $HANDS_URL (is the Claude Hands accessibility service on?)" >&2; exit 1; }
+  out=$(curl "${args[@]}" "$HANDS_URL$path") || { echo "hands: cannot reach $HANDS_URL (is the Scrobot accessibility service on?)" >&2; exit 1; }
   printf '%s\n' "$out"
   [[ $out == *'"ok":true'* ]]
 }
@@ -92,7 +92,7 @@ fetch() {
   local path=$1 dest=${2:-} tmp code
   tmp=$(mktemp "${TMPDIR:-/tmp}/hands.XXXXXX") || die "cannot create a temp file"
   code=$(curl -sS --max-time "${HANDS_TIMEOUT:-130}" -H "X-Token: $(token)" -o "$tmp" -w '%{http_code}' "$HANDS_URL$path") \
-    || { rm -f "$tmp"; echo "hands: cannot reach $HANDS_URL (is the Claude Hands accessibility service on?)" >&2; exit 1; }
+    || { rm -f "$tmp"; echo "hands: cannot reach $HANDS_URL (is the Scrobot accessibility service on?)" >&2; exit 1; }
   if [ "$code" != 200 ]; then
     cat "$tmp" >&2; rm -f "$tmp"
     echo "hands: HTTP $code" >&2

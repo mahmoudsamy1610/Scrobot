@@ -35,7 +35,7 @@ class KeepAliveService : Service() {
     private fun buildNotification(): Notification {
         val nm = getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL_ID) == null) {
-            val channel = NotificationChannel(CHANNEL_ID, "Claude Hands status", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(CHANNEL_ID, "Scrobot status", NotificationManager.IMPORTANCE_LOW)
             channel.description = "Shown while the local API is running"
             channel.setShowBadge(false)
             nm.createNotificationChannel(channel)
@@ -50,7 +50,7 @@ class KeepAliveService : Service() {
         )
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_hand)
-            .setContentTitle("Claude Hands is running")
+            .setContentTitle("Scrobot is running")
             .setContentText("Local API on 127.0.0.1:${Prefs.PORT}")
             .setOngoing(true)
             .setShowWhen(false)
