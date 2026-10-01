@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# hands - command-line client for the Claude Hands app (local API on 127.0.0.1:8765).
+# Works in Termux and in Ubuntu under proot. Needs only bash and curl.
+#
+# Token lookup order:
+#   1. $HANDS_TOKEN
+#   2. ~/.config/claude-hands/token        (written by `hands set-token`)
+#   3. /sdcard/Android/data/com.mahmoud.claudehands/files/token.txt
+#
+# In split screen, HANDS_PKG=com.whatsapp limits click/type/wait to that app.
+set -u
+
+HANDS_URL="${HANDS_URL:-http://127.0.0.1:8765}"
+TOKEN_FILE_LOCAL="${HOME}/.config/claude-hands/token"
+TOKEN_FILE_APP="/sdcard/Android/data/com.mahmoud.claudehands/files/token.txt"
+
+usage() {
+  cat <<'EOF'
+usage: hands COMMAND [ARGS]
+
+  ping                          check the app is reachable
+  screen [all]                  one node per line: x,y  id  text|desc|hint  [window]  {flags}
+  screen-json [all]             the same as JSON
+  tap X Y                       tap
+  longpress X Y [ms]            long press (default 800 ms)
+  swipe X1 Y1 X2 Y2 [ms]        swipe (default 300 ms)
+  click "TEXT" [index]          click node whose text/desc/hint contains TEXT
+  click-exact "TEXT" [index]    same, but the whole text must match
+  click-id ID [index]           click node by resource id (com.whatsapp:id/send or just send)
+  click-desc "DESC" [index]     click node by content description
+  type "TEXT" [FIELD]           type into the focused field, or the field matching FIELD
+  append "TEXT" [FIELD]         like type, but keeps the existing text
+  key KEY                       back home recents notifications quick_settings lock_screen
+                                screenshot split_screen power enter
+  open PACKAGE|URL              launch an app or open a link
+  wait "TEXT" [ms]              wait until TEXT appears (default 8000 ms)
+  wait-gone "TEXT" [ms]         wait until TEXT disappears
+  shot FILE.png                 save a screenshot
+  clip [TEXT]                   set the clipboard, or print it
+  (env HANDS_PKG=PACKAGE limits click/type/wait to one app, useful in split screen)
+  set-token TOKEN               save the token to ~/.config/claude-hands/token
+  raw ENDPOINT [JSON]           POST any JSON to any endpoint, e.g. hands raw /tap '{"x":1,"y":2}'
+
+Exit status is 0 when the app answered {"ok":true}, 1 otherwise.
+EOF
+}
+
+die() { echo "hands: $*" >&2; exit 2; }
+
+token() {
+  if [ -n "${HANDS_TOKEN:-}" ]; then printf '%s' "$HANDS_TOKEN"; return; fi
+  local f
+  for f in "$TOKEN_FILE_LOCAL" "$TOKEN_FILE_APP"; do
+    if [ -r "$f" ]; then tr -d ' \r\n' < "$f"; return; fi
+  done
+  die "no token. Copy it from the Claude Hands app and run: hands set-token <TOKEN>"
+}
+
+# JSON string escaping in pure bash (UTF-8 such as Arabic and emoji passes through unchanged).
+json_str() {
+  local s=$1
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\n'/\\n}
+  s=${s//$'\r'/\\r}
+  s=${s//$'\t'/\\t}
+  s=${s//$'\b'/\\b}
+  s=${s//$'\f'/\\f}
+  printf '"%s"' "$s"
+}
+
+# ,"package":"…" when HANDS_PKG is set
+pkg() { [ -n "${HANDS_PKG:-}" ] && printf ',"package":%s' "$(json_str "$HANDS_PKG")"; }
+
+is_int() { [[ $1 =~ ^[0-9]+$ ]] || die "not a number: $1"; }
+
+# call METHOD PATH [JSON] -> prints the body; exit 0 if it contains "ok":true
+call() {
+  local method=$1 path=$2 body=${3:-} out
+  local args=(-sS --max-time "${HANDS_TIMEOUT:-130}" -X "$method" -H "X-Token: $(token)")
+  if [ -n "$body" ]; then
+    args+=(-H 'Content-Type: application/json; charset=utf-8' --data-binary "$body")
+  fi
+  out=$(curl "${args[@]}" "$HANDS_URL$path") || { echo "hands: cannot reach $HANDS_URL (is the Claude Hands accessibility service on?)" >&2; exit 1; }
+  printf '%s\n' "$out"
+  [[ $out == *'"ok":true'* ]]
+}
+
+# Like call, but for endpoints that answer with plain text or binary on success.
+# fetch PATH [FILE]  (no FILE: print to stdout)
+fetch() {
+  local path=$1 dest=${2:-} tmp code
+  tmp=$(mktemp "${TMPDIR:-/tmp}/hands.XXXXXX") || die "cannot create a temp file"
+  code=$(curl -sS --max-time "${HANDS_TIMEOUT:-130}" -H "X-Token: $(token)" -o "$tmp" -w '%{http_code}' "$HANDS_URL$path") \
+    || { rm -f "$tmp"; echo "hands: cannot reach $HANDS_URL (is the Claude Hands accessibility service on?)" >&2; exit 1; }
+  if [ "$code" != 200 ]; then
+    cat "$tmp" >&2; rm -f "$tmp"
+    echo "hands: HTTP $code" >&2
+    return 1
+  fi
+  if [ -n "$dest" ]; then mv "$tmp" "$dest"; else cat "$tmp"; rm -f "$tmp"; fi
+}
+
+cmd=${1:-help}
+shift || true
+
+case $cmd in
+  ping)
+    call GET /ping ;;
+  screen)
+    if [ "${1:-}" = all ]; then fetch '/screen?format=text&all=1'; else fetch '/screen?format=text'; fi ;;
+  screen-json)
+    if [ "${1:-}" = all ]; then call GET '/screen?all=1'; else call GET /screen; fi ;;
+  tap)
+    [ $# -ge 2 ] || die "usage: hands tap X Y"; is_int "$1"; is_int "$2"
+    call POST /tap "{\"x\":$1,\"y\":$2}" ;;
+  longpress)
+    [ $# -ge 2 ] || die "usage: hands longpress X Y [ms]"; is_int "$1"; is_int "$2"; is_int "${3:-800}"
+    call POST /longpress "{\"x\":$1,\"y\":$2,\"ms\":${3:-800}}" ;;
+  swipe)
+    [ $# -ge 4 ] || die "usage: hands swipe X1 Y1 X2 Y2 [ms]"
+    for n in "$1" "$2" "$3" "$4" "${5:-300}"; do is_int "$n"; done
+    call POST /swipe "{\"x1\":$1,\"y1\":$2,\"x2\":$3,\"y2\":$4,\"ms\":${5:-300}}" ;;
+  click|click-exact|click-id|click-desc)
+    [ $# -ge 1 ] || die "usage: hands $cmd VALUE [index]"; is_int "${2:-0}"
+    case $cmd in
+      click) sel="\"text\":$(json_str "$1")" ;;
+      click-exact) sel="\"text\":$(json_str "$1"),\"exact\":true" ;;
+      click-id) sel="\"id\":$(json_str "$1")" ;;
+      click-desc) sel="\"desc\":$(json_str "$1")" ;;
+    esac
+    call POST /click "{$sel,\"index\":${2:-0}$(pkg)}" ;;
+  type|append)
+    [ $# -ge 1 ] || die "usage: hands $cmd TEXT [FIELD]"
+    body="\"text\":$(json_str "$1")"
+    [ $# -ge 2 ] && body+=",\"field\":$(json_str "$2")"
+    [ "$cmd" = append ] && body+=",\"append\":true"
+    call POST /type "{$body$(pkg)}" ;;
+  key)
+    [ $# -ge 1 ] || die "usage: hands key KEY"
+    call POST /key "{\"key\":$(json_str "$1")}" ;;
+  open)
+    [ $# -ge 1 ] || die "usage: hands open PACKAGE|URL"
+    if [[ $1 == *:* ]]; then call POST /open "{\"uri\":$(json_str "$1")}"
+    else call POST /open "{\"package\":$(json_str "$1")}"; fi ;;
+  wait|wait-gone)
+    [ $# -ge 1 ] || die "usage: hands $cmd TEXT [ms]"; is_int "${2:-8000}"
+    gone=false; [ "$cmd" = wait-gone ] && gone=true
+    HANDS_TIMEOUT=$(( ${2:-8000} / 1000 + 15 )) call POST /wait "{\"text\":$(json_str "$1"),\"timeout\":${2:-8000},\"gone\":$gone$(pkg)}" ;;
+  shot|screenshot)
+    [ $# -ge 1 ] || die "usage: hands shot FILE.png"
+    fetch '/screenshot?raw=1' "$1" && echo "saved $1" ;;
+  clip|clipboard)
+    if [ $# -ge 1 ]; then call POST /clipboard "{\"text\":$(json_str "$1")}"; else call POST /clipboard '{}'; fi ;;
+  set-token)
+    [ $# -ge 1 ] || die "usage: hands set-token TOKEN"
+    mkdir -p "$(dirname "$TOKEN_FILE_LOCAL")"
+    ( umask 077; printf '%s\n' "$1" > "$TOKEN_FILE_LOCAL" )
+    echo "saved to $TOKEN_FILE_LOCAL" ;;
+  raw)
+    [ $# -ge 1 ] || die "usage: hands raw ENDPOINT [JSON]"
+    call POST "/${1#/}" "${2:-{\}}" ;;
+  help|-h|--help)
+    usage ;;
+  *)
+    usage >&2; exit 2 ;;
+esac
