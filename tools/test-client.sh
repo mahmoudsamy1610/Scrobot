@@ -57,7 +57,9 @@ EXPECT='"ok":true' check "100 KB body (Expect: 100-continue)" "$HANDS" type "$BI
 EXPECT='400' check "invalid JSON -> 400" curl -s -o /dev/null -w '%{http_code}' -H "X-Token: $TOKEN" -d '{nope' "$HANDS_URL/tap"
 # The server must only listen on loopback.
 if command -v ss >/dev/null; then
-  EXPECT="127.0.0.1:$PORT" check "bound to 127.0.0.1 only" sh -c "ss -ltn | grep :$PORT"
+  # Accept 127.0.0.1:PORT and the IPv4-mapped form [::ffff:127.0.0.1]:PORT; anything else is a wildcard bind.
+  EXPECT="loopback-only" check "bound to 127.0.0.1 only" sh -c \
+    "ss -ltn | grep ':$PORT ' | awk '{print \$4}' | grep -qvE '^(\[::ffff:)?127\.0\.0\.1\]?:$PORT\$' && echo wildcard || echo loopback-only"
 fi
 echo "failures: $fails"
 exit $fails
