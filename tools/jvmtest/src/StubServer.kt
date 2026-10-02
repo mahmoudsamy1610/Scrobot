@@ -34,7 +34,12 @@ private fun parseFiles(paths: List<String>): Int {
 
 fun main(args: Array<String>) {
     if (args.firstOrNull() == "test") {
-        kotlin.system.exitProcess(ParserTest.run())
+        kotlin.system.exitProcess(ParserTest.run() + EngineTest.run())
+    }
+    if (args.firstOrNull() == "js") {
+        // Prints the exact program the app feeds to its WebView, for debugging.
+        println(JsBridge.program(java.io.File(args[1]).readText(), args.drop(2)))
+        return
     }
     if (args.firstOrNull() == "parse") {
         kotlin.system.exitProcess(parseFiles(args.drop(1)))
@@ -42,7 +47,7 @@ fun main(args: Array<String>) {
     val token = args.getOrElse(0) { "TESTTOKEN" }
     val port = args.getOrElse(1) { "8765" }.toInt()
     val router = Router({ token }, { m, p, ok, err, ms -> System.err.println("$m $p ok=$ok err=$err ${ms}ms") })
-    router.route("/ping") { JSONObject().put("version", "2.0") }
+    router.route("/ping") { JSONObject().put("version", "2.1") }
     for (path in listOf(
         "/tap", "/longpress", "/swipe", "/click", "/type", "/key", "/open", "/wait", "/clipboard",
         "/focus", "/scroll", "/sleep", "/script/run", "/script/stop", "/script/import",

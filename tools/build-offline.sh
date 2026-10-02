@@ -2,6 +2,9 @@
 # Builds and signs app/build/outputs/apk/release/scrobot-<version>.apk WITHOUT the Android
 # Gradle Plugin or the Google SDK downloads, using only:
 #   - Ubuntu packages:  aapt2, dx (dalvik-exchange), zipalign, apksigner, a JDK, Gradle
+#   - tools/desugar:    rewrites invokedynamic lambdas into plain classes. dx cannot do it and
+#                       Android cannot run them, so without this step every lambda in the Kotlin
+#                       standard library crashes the app with NoSuchMethodError: ... metafactory.
 #   - Maven Central:    Robolectric's android-all jars (the real framework classes and
 #                       resources.arsc) and the Kotlin compiler/stdlib.
 #     Code compiles against Android 16 (API 36). Resources link against the Android 14 table
@@ -16,8 +19,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION_NAME="${VERSION_NAME:-2.0}"   # CI overrides both
-VERSION_CODE="${VERSION_CODE:-2}"
+VERSION_NAME="${VERSION_NAME:-2.1}"   # CI overrides both
+VERSION_CODE="${VERSION_CODE:-3}"
 MIN_SDK=26
 TARGET_SDK=36
 PACKAGE="com.mahmoud.scrobot"
@@ -72,8 +75,40 @@ done
 cp "$APP_JAR" "$BUILD/libs/app.jar"
 zip -q -d "$BUILD/libs/app.jar" 'META-INF/*' >/dev/null 2>&1 || true
 
+echo "== desugar"
+DESUGAR="$ROOT/tools/desugar/build/install/scrobot-desugar/bin/scrobot-desugar"
+[ -x "$DESUGAR" ] || "${GRADLE:-gradle}" -q -p "$ROOT/tools/desugar" --no-daemon installDist
+for jar in "$BUILD"/libs/*.jar; do
+  "$DESUGAR" "$jar" "$jar.desugared" > /dev/null
+  mv "$jar.desugared" "$jar"
+done
+
+# Gate: nothing that is about to be dexed may still hold an invokedynamic call site.
+left=0
+for jar in "$BUILD"/libs/*.jar; do
+  dir="$BUILD/scan/$(basename "$jar")"
+  mkdir -p "$dir"
+  (cd "$dir" && unzip -qo "$jar")
+  while IFS= read -r class; do
+    if grep -qa BootstrapMethods "$class"; then
+      echo "FAILED: $(basename "$jar") still has invokedynamic in ${class#"$dir"/}" >&2
+      left=$((left + 1))
+    fi
+  done < <(find "$dir" -name '*.class')
+done
+rm -rf "$BUILD/scan"
+[ "$left" -eq 0 ] || { echo "the APK would crash on Android; stopping" >&2; exit 1; }
+echo "   no invokedynamic left in $(ls "$BUILD"/libs/*.jar | wc -l) jars"
+
 echo "== dex (dx)"
 "$DX" --dex --min-sdk-version="$MIN_SDK" --output="$BUILD/dex/classes.dex" "$BUILD"/libs/*.jar
+
+# Gate: Android has no working LambdaMetafactory, so the dex must not mention it.
+if strings "$BUILD/dex/classes.dex" | grep -qE "LambdaMetafactory|java/lang/invoke/CallSite"; then
+  echo "FAILED: classes.dex still refers to LambdaMetafactory" >&2
+  exit 1
+fi
+echo "   classes.dex is free of LambdaMetafactory"
 
 echo "== package"
 cp "$BUILD/resources.apk" "$BUILD/unsigned.apk"

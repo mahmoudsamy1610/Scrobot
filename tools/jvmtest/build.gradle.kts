@@ -8,7 +8,8 @@ sourceSets {
         kotlin.srcDirs("src")
         kotlin.include(
             "**/HttpServer.kt", "**/Router.kt", "**/ScriptParser.kt", "**/ActionInterpreter.kt",
-            "**/StubServer.kt", "**/ParserTest.kt",
+            "**/ShellBridge.kt", "**/JsBridge.kt",
+            "**/StubServer.kt", "**/ParserTest.kt", "**/EngineTest.kt",
         )
         kotlin.srcDir("../../app/src/main/java")
     }

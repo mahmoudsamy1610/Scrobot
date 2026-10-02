@@ -19,7 +19,8 @@ permission and exposes a small **HTTP API on `127.0.0.1:8765`**. Requests need a
 | `client/hands` | Bash client for Termux / proot Ubuntu |
 | `keystore/scrobot-release.jks.gpg` | The release signing key, encrypted (AES-256). The password is only in the `KEYSTORE_PASSWORD` GitHub secret. Every future version must be signed with this key to install over the old one. |
 | `tools/build-offline.sh` | Builds the signed APK without the Android Gradle Plugin (this is how the release APK was made) |
-| `tools/jvmtest/`, `tools/test-client.sh` | Runs the real `HttpServer`, `Router`, `ScriptParser` and `ActionInterpreter` on a JVM: 135 checks of the script language and the `hands` client. `scrobot-jvmtest parse FILE` also checks a script without a phone. |
+| `tools/desugar/`, `tools/check-desugar.sh` | Rewrites `invokedynamic` lambdas into plain classes, and proves the rewrite is faithful. See **Lambdas** below. |
+| `tools/jvmtest/`, `tools/test-client.sh` | Runs the real `HttpServer`, `Router`, `ScriptParser`, `ActionInterpreter`, `ShellBridge` and `JsBridge` on a JVM: 172 checks of the script language, both script engines and the `hands` client. `scrobot-jvmtest parse FILE` checks a script without a phone, and `scrobot-jvmtest js FILE` prints the program a `.js` script really runs. |
 
 ## Download the latest APK
 
@@ -32,6 +33,27 @@ https://github.com/mahmoudsamy1610/Scrobot/releases/latest/download/scrobot.apk
 The versionCode goes up with every run, so each APK installs over the previous one.
 CI signs with the encrypted key in `keystore/`, unlocked by the repository secret `KEYSTORE_PASSWORD`
 (Settings → Secrets and variables → Actions). Without that secret the build stops before signing.
+
+## Lambdas: why this build has its own desugaring step
+
+Android cannot run `invokedynamic` lambdas (`LambdaMetafactory`), so every Android build rewrites
+them into ordinary classes. Google's D8 does that, but it is published only on Google's Maven,
+which this build environment cannot reach, and `dx` — the dexer that can be installed here —
+silently passes `invokedynamic` through. Version 2.0 shipped that way and crashed the moment a
+script ran:
+
+```
+java.lang.NoSuchMethodError: No static method metafactory(...) in class LambdaMetafactory
+  at kotlin.io.FilesKt__FileReadWriteKt.readLines(FileReadWrite.kt:273)
+```
+
+The app's own code was already free of such call sites (the Kotlin compiler runs with
+`-Xlambdas=class -Xsam-conversions=class`), but `kotlin-stdlib` ships 77 of them.
+
+`tools/desugar` now rewrites each one into a small generated class, the way D8 does.
+`tools/check-desugar.sh` runs the same 55 standard-library calls against the original library and
+the rewritten one and compares the results, and the build fails if any jar still has a lambda call
+site or if `classes.dex` mentions `LambdaMetafactory`. All three run in CI.
 
 ## Building
 

@@ -23,7 +23,7 @@ trap 'kill $STUB 2>/dev/null' EXIT
 for _ in $(seq 50); do curl -s "$HANDS_URL/ping" >/dev/null && break; sleep 0.2; done
 
 EXPECT='"ok":true' check "ping" "$HANDS" ping
-EXPECT='"version":"2.0"' check "ping version" "$HANDS" ping
+EXPECT='"version":"2.1"' check "ping version" "$HANDS" ping
 RC=1 EXPECT='"ok":false' check "no token -> ok:false" env HANDS_TOKEN=wrong "$HANDS" ping
 EXPECT='401' check "no token -> 401" curl -s -o /dev/null -w '%{http_code}' "$HANDS_URL/ping"
 EXPECT='401' check "wrong token -> 401" curl -s -o /dev/null -w '%{http_code}' -H 'X-Token: nope' "$HANDS_URL/ping"

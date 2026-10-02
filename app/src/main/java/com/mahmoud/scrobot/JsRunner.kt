@@ -8,7 +8,6 @@ import android.os.SystemClock
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -103,9 +102,7 @@ class JsRunner(
             throw ApiError("the JavaScript engine did not start: $it", 500)
         }
 
-        val code = prelude(args) + "\n(async () => {\n" + source + "\n})().then(" +
-            "v => __scrobot.finish(true, v === undefined || v === null ? '' : String(v))," +
-            "e => __scrobot.finish(false, String((e && e.stack) || e)));"
+        val code = JsBridge.program(source, args)
         main.post { webView?.evaluateJavascript(code, null) }
 
         try {
@@ -131,56 +128,4 @@ class JsRunner(
         }
     }
 
-    /** The `scrobot` object every script gets, plus console capture. */
-    private fun prelude(args: List<String>): String {
-        val argsJson = JSONArray(args).toString()
-        return """
-            var scrobot = (function () {
-              function call(endpoint, args) {
-                var reply = JSON.parse(__scrobot.call(endpoint, JSON.stringify(args || {})));
-                if (!reply.ok) throw new Error(endpoint + ': ' + reply.error);
-                return reply;
-              }
-              function selector(sel, extra) {
-                var o = typeof sel === 'string' ? { text: sel } : Object.assign({}, sel || {});
-                return Object.assign(o, extra || {});
-              }
-              return {
-                args: $argsJson,
-                call: call,
-                log: function () {
-                  var parts = [];
-                  for (var i = 0; i < arguments.length; i++) {
-                    var a = arguments[i];
-                    parts.push(typeof a === 'string' ? a : JSON.stringify(a));
-                  }
-                  __scrobot.log(parts.join(' '));
-                },
-                stopped: function () { return __scrobot.stopped(); },
-                ping: function () { return call('/ping', {}); },
-                screen: function (all) { return call('/screen', all ? { all: true } : {}).nodes; },
-                find: function (sel) { return call('/find', selector(sel)); },
-                tap: function (x, y, ms) { return call('/tap', { x: x, y: y, ms: ms || 60 }); },
-                longpress: function (x, y, ms) { return call('/longpress', { x: x, y: y, ms: ms || 800 }); },
-                swipe: function (x1, y1, x2, y2, ms) { return call('/swipe', { x1: x1, y1: y1, x2: x2, y2: y2, ms: ms || 300 }); },
-                click: function (sel, extra) { return call('/click', selector(sel, extra)); },
-                type: function (text, field) { return call('/type', field ? { text: text, field: field } : { text: text }); },
-                append: function (text, field) { return call('/type', { text: text, field: field, append: true }); },
-                key: function (name) { return call('/key', { key: name }); },
-                open: function (target) {
-                  return call('/open', String(target).indexOf('://') >= 0 ? { uri: target } : { package: target });
-                },
-                wait: function (sel, timeout) { return call('/wait', selector(sel, { timeout: timeout || 8000 })); },
-                waitGone: function (sel, timeout) { return call('/wait', selector(sel, { timeout: timeout || 8000, gone: true })); },
-                focus: function (direction) { return call('/focus', { direction: direction || 'next' }); },
-                scroll: function (direction, sel) { return call('/scroll', selector(sel, { direction: direction || 'forward' })); },
-                shot: function (name) { return call('/screenshot', { save: name || '' }); },
-                clipboard: function (text) { return call('/clipboard', text === undefined ? {} : { text: text }); },
-                sleep: function (ms) { return call('/sleep', { ms: ms }); }
-              };
-            })();
-            console.log = function () { scrobot.log.apply(null, arguments); };
-            console.warn = console.error = console.info = console.log;
-        """.trimIndent()
-    }
 }
