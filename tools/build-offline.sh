@@ -19,8 +19,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION_NAME="${VERSION_NAME:-2.2}"   # CI overrides both
-VERSION_CODE="${VERSION_CODE:-4}"
+VERSION_NAME="${VERSION_NAME:-3.0}"   # CI overrides both
+VERSION_CODE="${VERSION_CODE:-5}"
 MIN_SDK=26
 TARGET_SDK=36
 PACKAGE="com.mahmoud.scrobot"

@@ -21,8 +21,8 @@ android {
         applicationId = "com.mahmoud.scrobot"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "2.2"
+        versionCode = 5
+        versionName = "3.0"
     }
 
     signingConfigs {

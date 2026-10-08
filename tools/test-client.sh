@@ -23,7 +23,7 @@ trap 'kill $STUB 2>/dev/null' EXIT
 for _ in $(seq 50); do curl -s "$HANDS_URL/ping" >/dev/null && break; sleep 0.2; done
 
 EXPECT='"ok":true' check "ping" "$HANDS" ping
-EXPECT='"version":"2.2"' check "ping version" "$HANDS" ping
+EXPECT='"version":"3.0"' check "ping version" "$HANDS" ping
 RC=1 EXPECT='"ok":false' check "no token -> ok:false" env HANDS_TOKEN=wrong "$HANDS" ping
 EXPECT='401' check "no token -> 401" curl -s -o /dev/null -w '%{http_code}' "$HANDS_URL/ping"
 EXPECT='401' check "wrong token -> 401" curl -s -o /dev/null -w '%{http_code}' -H 'X-Token: nope' "$HANDS_URL/ping"
@@ -97,6 +97,19 @@ EXPECT='"ok":true' check "stop" "$HANDS" stop
 EXPECT='"checked":true' check "check" "$HANDS" check login.scro
 EXPECT='"source":"tap 1 2' check "show prints the script" "$HANDS" show login.scro
 EXPECT='"name":"login.scro"' check "rm" "$HANDS" rm login.scro
+
+
+# --- triggers
+EXPECT='"name":"wa"' check "triggers list" "$HANDS" triggers
+EXPECT='"kind":"app"' check "trigger-add passes the rule through" "$HANDS" trigger-add '{"name":"wa","kind":"app","match":"com.whatsapp","script":"greet.scro"}'
+printf '{"triggers":[{"name":"wa","kind":"app","match":"com.whatsapp","script":"greet.scro"}]}' > /tmp/hands-triggers.json
+EXPECT='"name":"wa"' check "trigger-add takes a file" "$HANDS" trigger-add /tmp/hands-triggers.json
+EXPECT='"source":"{\"triggers\"' check "trigger-import sends the file" "$HANDS" trigger-import /tmp/hands-triggers.json
+EXPECT='"name":"wa"' check "trigger-rm" "$HANDS" trigger-rm wa
+EXPECT='"enabled":true' check "trigger-on" "$HANDS" trigger-on wa
+EXPECT='"enabled":false' check "trigger-off" "$HANDS" trigger-off wa
+EXPECT='"name":"wa"' check "trigger-fire" "$HANDS" trigger-fire wa
+RC=2 EXPECT='usage' check "trigger-rm needs a name" "$HANDS" trigger-rm
 
 echo "failures: $fails"
 exit $fails

@@ -14,6 +14,15 @@ private fun parseFiles(paths: List<String>): Int {
         val file = java.io.File(path)
         val source = file.readText()
         try {
+            // A triggers.json is a list of rules, not a script.
+            if (source.contains("\"triggers\"") || source.contains("\"kind\"")) {
+                val triggers = Trigger.listFrom(source)
+                for (trigger in triggers) {
+                    println("%-24s %-20s %-30s -> %s".format(file.name, trigger.name, trigger.describe(), trigger.script))
+                }
+                println("%-24s OK, ${triggers.size} triggers".format(file.name))
+                continue
+            }
             val steps = if (path.endsWith(".json")) ScriptParser.parseJson(source) else ScriptParser.parse(source)
             for (step in steps) {
                 if (step.verb in ScriptParser.CONTROL) {
@@ -27,6 +36,9 @@ private fun parseFiles(paths: List<String>): Int {
         } catch (e: ScriptError) {
             println("%-24s FAILED line ${e.line}: ${e.message}".format(file.name))
             bad++
+        } catch (e: ApiError) {
+            println("%-24s FAILED: ${e.message}".format(file.name))
+            bad++
         }
     }
     return bad
@@ -34,7 +46,7 @@ private fun parseFiles(paths: List<String>): Int {
 
 fun main(args: Array<String>) {
     if (args.firstOrNull() == "test") {
-        kotlin.system.exitProcess(ParserTest.run() + EngineTest.run() + StabilityTest.run())
+        kotlin.system.exitProcess(ParserTest.run() + EngineTest.run() + StabilityTest.run() + TriggerTest.run())
     }
     if (args.firstOrNull() == "js") {
         // Prints the exact program the app feeds to its WebView, for debugging.
@@ -50,13 +62,14 @@ fun main(args: Array<String>) {
     // "disconnected=1" pretends the accessibility service went away, as the app reports it.
     router.route("/ping") { a ->
         val state = Status.of(enabledInSettings = true, connected = !a.optBoolean("disconnected"), serverRunning = true)
-        JSONObject().put("version", "2.2").put("service", state.isWorking)
+        JSONObject().put("version", "3.0").put("service", state.isWorking)
             .apply { state.reason?.let { put("reason", it) } }
     }
     for (path in listOf(
         "/tap", "/longpress", "/swipe", "/click", "/type", "/key", "/open", "/wait", "/clipboard",
         "/focus", "/scroll", "/sleep", "/script/run", "/script/stop", "/script/import",
-        "/script/delete",
+        "/script/delete", "/trigger/add", "/trigger/import", "/trigger/delete", "/trigger/enable",
+        "/trigger/fire",
     )) {
         router.route(path) { a -> JSONObject().put("endpoint", path).put("received", a) }
     }
@@ -67,6 +80,11 @@ fun main(args: Array<String>) {
     }
     router.route("/find") { a ->
         JSONObject().put("found", a.optString("text") == "Send").put("received", a)
+    }
+    router.route("/triggers") {
+        JSONObject()
+            .put("file", "/sdcard/Android/data/com.mahmoud.scrobot/files/triggers.json")
+            .put("triggers", org.json.JSONArray().put(JSONObject().put("name", "wa").put("kind", "app")))
     }
     router.route("/script/check") { a ->
         JSONObject().put("checked", true).put("steps", 3).put("name", a.optString("name"))

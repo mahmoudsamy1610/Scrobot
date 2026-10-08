@@ -12,10 +12,11 @@ object Prefs {
     private const val KEY_API_ENABLED = "api_enabled"
     private const val KEY_DISCONNECTED_SINCE = "disconnected_since"
     private const val KEY_WARNED = "warned"
+    private const val KEY_BOOT_PENDING = "boot_pending"
     private const val TOKEN_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
     const val PORT = Status.PORT
-    const val VERSION = "2.2"
+    const val VERSION = "3.0"
 
     private fun prefs(context: Context): SharedPreferences =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -68,6 +69,13 @@ object Prefs {
 
     fun setWarned(context: Context, warned: Boolean) {
         prefs(context).edit().putBoolean(KEY_WARNED, warned).apply()
+    }
+
+    /** Set when the phone starts, cleared once `boot` triggers have had their run. */
+    fun bootPending(context: Context): Boolean = prefs(context).getBoolean(KEY_BOOT_PENDING, false)
+
+    fun setBootPending(context: Context, pending: Boolean) {
+        prefs(context).edit().putBoolean(KEY_BOOT_PENDING, pending).apply()
     }
 
     fun tokenFile(context: Context): File? = context.getExternalFilesDir(null)?.let { File(it, "token.txt") }

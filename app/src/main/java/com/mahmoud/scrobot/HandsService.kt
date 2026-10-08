@@ -20,6 +20,7 @@ class HandsService : AccessibilityService() {
         CrashLog.note("accessibility service connected")
         ApiLog.note("Accessibility service connected")
         Prefs.setDisconnectedSince(this, 0)
+        Triggers.reload(this)
         if (Prefs.isApiEnabled(this)) {
             ApiServer.start(this)
             KeepAliveService.start(this)
@@ -29,7 +30,9 @@ class HandsService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Nothing to do: the API reads the window tree on demand.
+        // The API reads the window tree on demand; events are only needed by triggers.
+        val seen = event ?: return
+        CrashLog.guard("handling an accessibility event") { Triggers.onAccessibilityEvent(this, seen) }
     }
 
     override fun onInterrupt() {}

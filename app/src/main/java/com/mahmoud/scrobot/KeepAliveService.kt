@@ -31,10 +31,19 @@ class KeepAliveService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private var systemReceiver: SystemReceiver? = null
+
     override fun onCreate() {
         super.onCreate()
         CrashLog.start(java.io.File(filesDir, "scrobot.log"))
         CrashLog.installHandler(mainLooper.thread, Thread.getDefaultUncaughtExceptionHandler())
+        try {
+            val receiver = SystemReceiver()
+            registerReceiver(receiver, SystemReceiver.filter())
+            systemReceiver = receiver
+        } catch (e: Throwable) {
+            CrashLog.error("could not listen for screen and charger changes", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -59,6 +68,14 @@ class KeepAliveService : Service() {
 
     override fun onDestroy() {
         beat.removeCallbacks(heartbeat)
+        systemReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (e: Throwable) {
+                CrashLog.note("receiver was already gone")
+            }
+        }
+        systemReceiver = null
         super.onDestroy()
     }
 
@@ -66,6 +83,8 @@ class KeepAliveService : Service() {
     private fun check() {
         if (Prefs.isApiEnabled(this) && !ApiServer.isRunning) ApiServer.start(this)
         updateNotification()
+        // Scheduled triggers, and the one run after the phone starts.
+        CrashLog.guard("checking triggers") { Triggers.tick(this) }
 
         val connected = HandsService.instance != null
         if (connected) {

@@ -96,6 +96,12 @@ class Api(private val context: Context, private val accessibility: () -> Accessi
             }
         }
         actions["/script/import"] = ::importScript
+        actions["/triggers"] = { Triggers.toJson(context) }
+        actions["/trigger/add"] = ::addTrigger
+        actions["/trigger/import"] = ::importTriggers
+        actions["/trigger/delete"] = ::deleteTrigger
+        actions["/trigger/enable"] = ::enableTrigger
+        actions["/trigger/fire"] = ::fireTrigger
         actions["/script/check"] = ::checkScript
         actions["/script/read"] = ::readScript
         actions["/script/delete"] = ::deleteScript
@@ -161,6 +167,61 @@ class Api(private val context: Context, private val accessibility: () -> Accessi
         val name = str(a, "name") ?: throw ApiError("missing \"name\"")
         if (!ScriptStore.delete(context, name)) throw ApiError("no script called \"$name\"", 404)
         return JSONObject().put("deleted", name)
+    }
+
+    // ---------------------------------------------------------------- triggers
+
+    /** Adds one trigger, or replaces the one with the same name. */
+    private fun addTrigger(a: JSONObject): JSONObject {
+        val body = if (a.has("trigger") && !a.isNull("trigger")) a.getJSONObject("trigger") else a
+        val trigger = Trigger.from(body)
+        warnIfScriptMissing(trigger)
+        TriggerStore.add(context, trigger)
+        Triggers.reload(context)
+        return JSONObject().put("added", trigger.toJson()).put("description", trigger.describe())
+    }
+
+    /** Replaces the whole list from an imported `triggers.json`. */
+    private fun importTriggers(a: JSONObject): JSONObject {
+        val source = if (a.has("source") && !a.isNull("source")) a.getString("source")
+        else throw ApiError("missing \"source\"")
+        val triggers = Trigger.listFrom(source)
+        triggers.forEach(::warnIfScriptMissing)
+        TriggerStore.save(context, triggers)
+        Triggers.reload(context)
+        return JSONObject().put("imported", triggers.size)
+    }
+
+    private fun deleteTrigger(a: JSONObject): JSONObject {
+        val name = str(a, "name") ?: throw ApiError("missing \"name\"")
+        if (!TriggerStore.remove(context, name)) throw ApiError("no trigger called \"$name\"", 404)
+        Triggers.reload(context)
+        return JSONObject().put("deleted", name)
+    }
+
+    private fun enableTrigger(a: JSONObject): JSONObject {
+        val name = str(a, "name") ?: throw ApiError("missing \"name\"")
+        val enabled = !a.has("enabled") || a.optBoolean("enabled", true)
+        val changed = TriggerStore.setEnabled(context, name, enabled)
+            ?: throw ApiError("no trigger called \"$name\"", 404)
+        Triggers.reload(context)
+        return JSONObject().put("trigger", changed.toJson())
+    }
+
+    /** Runs a trigger's script now, to try it out. */
+    private fun fireTrigger(a: JSONObject): JSONObject {
+        val name = str(a, "name") ?: throw ApiError("missing \"name\"")
+        val trigger = Triggers.list(context).firstOrNull { it.name.equals(name, true) }
+            ?: throw ApiError("no trigger called \"$name\"", 404)
+        Triggers.run(context, trigger, "tried by hand")
+        return JSONObject().put("fired", trigger.name).put("script", trigger.script)
+    }
+
+    /** A trigger pointing at a script that is not there would fail silently later. */
+    private fun warnIfScriptMissing(trigger: Trigger) {
+        if (ScriptStore.find(context, trigger.script) == null) {
+            throw ApiError("there is no script called \"${trigger.script}\" to run; import it first", 404)
+        }
     }
 
     // ---------------------------------------------------------------- /find, /focus, /scroll, /sleep

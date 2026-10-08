@@ -15,13 +15,14 @@ permission and exposes a small **HTTP API on `127.0.0.1:8765`**. Requests need a
 | `app/src/main/java/com/mahmoud/scrobot/` | `HandsService` (accessibility service, owns everything below), `Api` (endpoints), `Nodes` (window/node search), `HttpServer` + `Router` (hand-written HTTP server, token check), `MainActivity`, `KeepAliveService` (foreground notification), `StopReceiver`, `Prefs`, `ApiLog` |
 | …`ScriptStore` `ScriptParser` `ActionInterpreter` `ScriptRunner` `JsRunner` `ShellRunner` | version 2: imported scripts — the scripts folder, the action language, its interpreter, and the JavaScript and shell engines |
 | …`ApiServer` `Status` `CrashLog` `AccessibilityList` `AccessibilityRepair` `UpdateReceiver` | version 2.2: staying alive and telling the truth about it — see **When it says ON but does nothing** |
+| …`Trigger` `TriggerEngine` `TriggerStore` `Triggers` `SystemReceiver` `BootReceiver` | version 3: triggers — the rules, when they fire, where they are kept, and the events that set them off |
 | `examples/` | scripts to import and try |
 | `app/src/main/res/xml/accessibility_service_config.xml` | gestures, window content, screenshots, `flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews`, all event types |
 | `client/hands` | Bash client for Termux / proot Ubuntu |
 | `keystore/scrobot-release.jks.gpg` | The release signing key, encrypted (AES-256). The password is only in the `KEYSTORE_PASSWORD` GitHub secret. Every future version must be signed with this key to install over the old one. |
 | `tools/build-offline.sh` | Builds the signed APK without the Android Gradle Plugin (this is how the release APK was made) |
 | `tools/desugar/`, `tools/check-desugar.sh` | Rewrites `invokedynamic` lambdas into plain classes, and proves the rewrite is faithful. See **Lambdas** below. |
-| `tools/jvmtest/`, `tools/test-client.sh` | Runs the real `HttpServer`, `Router`, `ScriptParser`, `ActionInterpreter`, `ShellBridge` and `JsBridge` on a JVM: 218 checks of the script language, both script engines, the status and crash-log behaviour, server restarts and the `hands` client. `scrobot-jvmtest parse FILE` checks a script without a phone, and `scrobot-jvmtest js FILE` prints the program a `.js` script really runs. |
+| `tools/jvmtest/`, `tools/test-client.sh` | Runs the real `HttpServer`, `Router`, `ScriptParser`, `ActionInterpreter`, `ShellBridge` and `JsBridge` on a JVM: 294 checks of the script language, both script engines, the trigger rules and schedules, the status and crash-log behaviour, server restarts and the `hands` client. `scrobot-jvmtest parse FILE` checks a script without a phone, and `scrobot-jvmtest js FILE` prints the program a `.js` script really runs. |
 
 ## Download the latest APK
 
@@ -132,6 +133,12 @@ Each reply is `{"ok":true,...}`, or `{"ok":false,"error":"..."}` with a non-200 
 | `/script/import` | `{"name":"login.scro","source":"..."}` | Saves a script. |
 | `/script/check` | `{"name":...}` or `{"source":...}` | Parses an action or JSON script without running it, and names the first mistake. |
 | `/script/read`, `/script/delete` | `{"name":...}` | Read or delete a script. |
+| `GET /triggers` | – | Every trigger, what it does, when it last ran and when it runs next. |
+| `/trigger/add` | one trigger as JSON | Adds it, or replaces the one with the same name. |
+| `/trigger/import` | `{"source":"<triggers.json>"}` | Replaces the whole list. |
+| `/trigger/enable` | `{"name":...,"enabled":false}` | Switches one on or off. |
+| `/trigger/fire` | `{"name":...}` | Runs its script now, to try it. |
+| `/trigger/delete` | `{"name":...}` | Deletes one. |
 
 ```bash
 T=$(cat ~/.config/scrobot/token)
@@ -229,6 +236,56 @@ run's arguments, stdout and stderr become the run's output, and a non-zero exit 
 Android does not let an app execute files it wrote, so the script is read by `sh` rather than
 executed, and `scrobot` is a shell function: it is not inherited by a `sh -c` sub-shell.
 
+## Triggers
+
+A trigger runs a script by itself. They are kept in `triggers.json` next to the scripts, and are
+added the way everything else is: imported from the app, or sent through the API.
+
+| Kind | Fires | Needs |
+|---|---|---|
+| `app` | an app comes to the front | `match`: the package, e.g. `com.whatsapp`; optional `window` to narrow it to a screen title |
+| `text` | something appears on screen | `match`: the text (case-insensitive, anywhere); optional `package` |
+| `schedule` | on the clock | `every`: minutes, or `at`: `"08:30"` |
+| `screen` | the screen or lock | `match`: `on`, `off` or `unlocked` |
+| `power` | the charger | `match`: `charging` or `unplugged` |
+| `boot` | after the phone starts | – |
+
+```json
+{ "triggers": [
+  { "name": "whatsapp-opened", "kind": "app", "match": "com.whatsapp",
+    "script": "greet.scro", "cooldown": 60 },
+  { "name": "morning", "kind": "schedule", "at": "08:30", "script": "brief.js" },
+  { "name": "battery-low", "kind": "text", "match": "Battery low",
+    "script": "save.sh", "args": ["now"], "cooldown": 600 }
+] }
+```
+
+Every trigger also takes `args` (passed to the script as `$1`…), `enabled`, and `cooldown` in
+seconds. `examples/triggers.json` has one of each kind.
+
+```
+hands triggers                       hands trigger-add '<json>'|FILE
+hands trigger-import triggers.json   hands trigger-rm NAME
+hands trigger-on NAME                hands trigger-off NAME
+hands trigger-fire NAME              # run its script now, to try it
+```
+
+The app's screen lists them with an **On/Off** button each, and ⋯ to try or delete one.
+
+**Rules that keep triggers from running away:**
+
+- Nothing fires while a script is running, so a script cannot set itself off again.
+- Each trigger waits out its `cooldown` before it may run a second time.
+- `app` and `text` fire on the way *in* — when the app comes to the front, or the text first
+  appears — not over and over while it stays there.
+- A daily time only counts while the app is running: if the phone was asleep at 08:30, that day's
+  run is skipped rather than going off at lunchtime.
+- Adding a trigger whose script is not imported is refused, instead of failing silently later.
+- Times are checked by the foreground service's heartbeat, about every 20 seconds, so a schedule
+  can be a few seconds late — and later if Android has stopped the app.
+- `text` triggers read the whole screen, so they are throttled to about once every 1.5 seconds,
+  and only while such a trigger exists and is switched on.
+
 ## The `hands` client
 
 ```
@@ -273,7 +330,8 @@ from reading `Android/data`**, so plan on `hands set-token`.
    Settings → Battery → Background usage limits and make sure Scrobot is not in *Sleeping* or
    *Deep sleeping* apps. You can add it to *Never auto sleeping apps*.
 6. **Try a script.** Copy a file from `examples/` to the phone, tap **Import script…** in the app,
-   then **Run**. `examples/tab-through.scro` is safe to try anywhere.
+   then **Run**. `examples/tab-through.scro` is safe to try anywhere. `examples/triggers.json`
+   goes in through **Import triggers…**, once the scripts it names are imported.
 7. **Install `hands` in Termux.** Copy `hands` to Downloads, then in Termux:
    ```bash
    termux-setup-storage                       # once, to reach /sdcard

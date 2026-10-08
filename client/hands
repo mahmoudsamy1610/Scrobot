@@ -53,6 +53,17 @@ scripts (.scro actions, .json steps, .js, .sh):
   check NAME                    parse a script without running it
   show NAME                     print a script
   rm NAME                       delete a script
+
+triggers (run a script by themselves):
+  triggers                      list them, with when each last ran
+  trigger-add JSON|FILE         add or replace one, e.g.
+                                hands trigger-add '{"name":"wa","kind":"app",
+                                  "match":"com.whatsapp","script":"greet.scro"}'
+  trigger-import FILE           replace the whole list from a triggers.json
+  trigger-rm NAME               delete one
+  trigger-on NAME               enable
+  trigger-off NAME              disable
+  trigger-fire NAME             run its script now, to try it
   set-token TOKEN               save the token to ~/.config/scrobot/token
   raw ENDPOINT [JSON]           POST any JSON to any endpoint, e.g. hands raw /tap '{"x":1,"y":2}'
 
@@ -230,6 +241,27 @@ case $cmd in
   rm)
     [ $# -ge 1 ] || die "usage: hands rm NAME"
     call POST /script/delete "{\"name\":$(json_str "$1")}" ;;
+  triggers)
+    fetch /triggers ;;
+  trigger-add)
+    [ $# -ge 1 ] || die "usage: hands trigger-add JSON|FILE"
+    body=$1
+    [ -r "$body" ] && body=$(cat "$body")
+    call POST /trigger/add "$body" ;;
+  trigger-import)
+    [ $# -ge 1 ] || die "usage: hands trigger-import FILE"
+    [ -r "$1" ] || die "cannot read $1"
+    call POST /trigger/import "{\"source\":$(json_str "$(cat "$1")")}" ;;
+  trigger-rm)
+    [ $# -ge 1 ] || die "usage: hands trigger-rm NAME"
+    call POST /trigger/delete "{\"name\":$(json_str "$1")}" ;;
+  trigger-on|trigger-off)
+    [ $# -ge 1 ] || die "usage: hands $cmd NAME"
+    on=true; [ "$cmd" = trigger-off ] && on=false
+    call POST /trigger/enable "{\"name\":$(json_str "$1"),\"enabled\":$on}" ;;
+  trigger-fire)
+    [ $# -ge 1 ] || die "usage: hands trigger-fire NAME"
+    call POST /trigger/fire "{\"name\":$(json_str "$1")}" ;;
   set-token)
     [ $# -ge 1 ] || die "usage: hands set-token TOKEN"
     mkdir -p "$(dirname "$TOKEN_FILE_LOCAL")"

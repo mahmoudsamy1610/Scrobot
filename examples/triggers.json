@@ -1,0 +1,37 @@
+{
+  "triggers": [
+    {
+      "name": "whatsapp-opened",
+      "kind": "app",
+      "match": "com.whatsapp",
+      "script": "tab-through.scro",
+      "cooldown": 60
+    },
+    {
+      "name": "every-30-min",
+      "kind": "schedule",
+      "every": 30,
+      "script": "save-screen.sh"
+    },
+    {
+      "name": "morning-shot",
+      "kind": "schedule",
+      "at": "08:30",
+      "script": "save-screen.sh"
+    },
+    {
+      "name": "on-unlock",
+      "kind": "screen",
+      "match": "unlocked",
+      "script": "find-buttons.js",
+      "enabled": false
+    },
+    {
+      "name": "battery-low",
+      "kind": "text",
+      "match": "Battery low",
+      "script": "save-screen.sh",
+      "cooldown": 600
+    }
+  ]
+}

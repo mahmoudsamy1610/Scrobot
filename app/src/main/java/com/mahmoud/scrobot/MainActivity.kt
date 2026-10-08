@@ -37,6 +37,8 @@ class MainActivity : Activity() {
     private lateinit var logView: TextView
     private lateinit var scriptsView: LinearLayout
     private lateinit var scriptsHeader: TextView
+    private lateinit var triggersView: LinearLayout
+    private lateinit var triggersHeader: TextView
     private val logListener: () -> Unit = { runOnUiThread { refresh() } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,6 +62,7 @@ class MainActivity : Activity() {
         ApiLog.addListener(logListener)
         refresh()
         refreshScripts()
+        refreshTriggers()
     }
 
     override fun onPause() {
@@ -172,6 +175,13 @@ class MainActivity : Activity() {
         scriptsView = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         column.addView(scriptsView)
 
+        column.addView(header("Triggers"))
+        triggersHeader = text("", 13f)
+        column.addView(triggersHeader)
+        triggersView = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        column.addView(triggersView)
+        column.addView(button("Import triggers…") { pickTriggers() })
+
         column.addView(header("Last 50 API calls"))
         logView = text("", 12f, mono = true).apply { setTextIsSelectable(true) }
         column.addView(logView)
@@ -227,6 +237,65 @@ class MainActivity : Activity() {
             line.addView(button("Run") { runScript(file.name) })
             line.addView(button("⋯") { scriptMenu(file.name) })
             scriptsView.addView(line)
+        }
+    }
+
+    private fun refreshTriggers() {
+        triggersView.removeAllViews()
+        val triggers = Triggers.list(this)
+        triggersHeader.text = if (triggers.isEmpty()) {
+            "No triggers yet. A trigger runs a script by itself — when an app opens, on a schedule," +
+                " at boot, when the screen unlocks, or when some text appears.\nImport a triggers.json," +
+                " or add one with: hands trigger-add"
+        } else {
+            "${triggers.size} trigger${if (triggers.size == 1) "" else "s"} in\n${TriggerStore.file(this)}"
+        }
+        for (trigger in triggers) {
+            val line = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val label = "${trigger.name}  →  ${trigger.script}\n${trigger.describe()}" +
+                if (trigger.enabled) "" else "  (off)"
+            line.addView(
+                text(label, 14f).apply { if (!trigger.enabled) alpha = 0.5f },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            line.addView(button(if (trigger.enabled) "Off" else "On") {
+                TriggerStore.setEnabled(this, trigger.name, !trigger.enabled)
+                Triggers.reload(this)
+                refreshTriggers()
+            })
+            line.addView(button("⋯") { triggerMenu(trigger) })
+            triggersView.addView(line)
+        }
+    }
+
+    private fun triggerMenu(trigger: Trigger) {
+        AlertDialog.Builder(this)
+            .setTitle(trigger.name)
+            .setMessage("${trigger.describe()}\nRuns ${trigger.script}")
+            .setItems(arrayOf("Try it now", "Delete")) { _, which ->
+                when (which) {
+                    0 -> {
+                        Triggers.run(this, trigger, "tried by hand")
+                        Toast.makeText(this, "Running ${trigger.script}", Toast.LENGTH_SHORT).show()
+                    }
+                    1 -> {
+                        TriggerStore.remove(this, trigger.name)
+                        Triggers.reload(this)
+                        refreshTriggers()
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun pickTriggers() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*")
+        try {
+            startActivityForResult(intent, REQUEST_TRIGGERS)
+        } catch (e: Exception) {
+            Toast.makeText(this, "No file picker on this phone", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -299,7 +368,12 @@ class MainActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_IMPORT || resultCode != RESULT_OK || data == null) return
+        if (resultCode != RESULT_OK || data == null) return
+        if (requestCode == REQUEST_TRIGGERS) {
+            importTriggers(data.data ?: return)
+            return
+        }
+        if (requestCode != REQUEST_IMPORT) return
         val uris = ArrayList<Uri>()
         data.clipData?.let { clip -> for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri) }
         data.data?.let { uris.add(it) }
@@ -321,6 +395,25 @@ class MainActivity : Activity() {
             Toast.makeText(this, "Imported $imported", Toast.LENGTH_SHORT).show()
         }
         refreshScripts()
+    }
+
+    private fun importTriggers(uri: Uri) {
+        try {
+            val source = contentResolver.openInputStream(uri)?.use { String(it.readBytes(), Charsets.UTF_8) }
+                ?: throw ApiError("could not read the file")
+            val triggers = Trigger.listFrom(source)
+            for (trigger in triggers) {
+                if (ScriptStore.find(this, trigger.script) == null) {
+                    throw ApiError("\"${trigger.name}\" runs \"${trigger.script}\", which is not imported yet")
+                }
+            }
+            TriggerStore.save(this, triggers)
+            Triggers.reload(this)
+            Toast.makeText(this, "Imported ${triggers.size} triggers", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, e.message ?: "could not import", Toast.LENGTH_LONG).show()
+        }
+        refreshTriggers()
     }
 
     private fun displayName(uri: Uri): String {
@@ -417,5 +510,6 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQUEST_IMPORT = 7
+        private const val REQUEST_TRIGGERS = 8
     }
 }

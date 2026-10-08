@@ -26,7 +26,7 @@ jobs:
         # 1.0.<run>; versionCode grows with every run so each APK installs over the previous one
         # (the first hand-built APK was versionCode 1).
         run: |
-          echo "VERSION_NAME=2.2.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=3.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
           echo "VERSION_CODE=$((GITHUB_RUN_NUMBER + 100))" >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@v5

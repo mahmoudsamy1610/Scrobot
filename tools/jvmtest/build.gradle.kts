@@ -9,8 +9,8 @@ sourceSets {
         kotlin.include(
             "**/HttpServer.kt", "**/Router.kt", "**/ScriptParser.kt", "**/ActionInterpreter.kt",
             "**/ShellBridge.kt", "**/JsBridge.kt", "**/Status.kt", "**/AccessibilityList.kt",
-            "**/CrashLog.kt", "**/ApiLog.kt",
-            "**/StubServer.kt", "**/ParserTest.kt", "**/EngineTest.kt", "**/StabilityTest.kt",
+            "**/CrashLog.kt", "**/ApiLog.kt", "**/Trigger.kt", "**/TriggerEngine.kt",
+            "**/StubServer.kt", "**/ParserTest.kt", "**/EngineTest.kt", "**/StabilityTest.kt", "**/TriggerTest.kt",
         )
         kotlin.srcDir("../../app/src/main/java")
     }
