@@ -29,6 +29,9 @@ import org.json.JSONObject
 class MainActivity : Activity() {
 
     private lateinit var statusView: TextView
+    private lateinit var warningView: TextView
+    private lateinit var fixButton: Button
+    private lateinit var repairButton: Button
     private lateinit var tokenView: TextView
     private lateinit var batteryView: TextView
     private lateinit var logView: TextView
@@ -50,10 +53,10 @@ class MainActivity : Activity() {
         super.onResume()
         // Opening the app re-enables the API after the notification's Stop action.
         Prefs.setApiEnabled(this, true)
-        HandsService.instance?.let {
-            it.startServer()
-            KeepAliveService.start(this)
-        }
+        CrashLog.start(java.io.File(filesDir, "scrobot.log"))
+        CrashLog.installHandler(mainLooper.thread, Thread.getDefaultUncaughtExceptionHandler())
+        ApiServer.start(this)
+        KeepAliveService.start(this)
         ApiLog.addListener(logListener)
         refresh()
         refreshScripts()
@@ -65,15 +68,19 @@ class MainActivity : Activity() {
     }
 
     private fun refresh() {
-        val service = HandsService.instance
-        val enabledInSettings = isEnabledInSettings()
-        statusView.text = when {
-            service != null && service.isServerRunning -> "Service: ON\nAPI: listening on http://127.0.0.1:${Prefs.PORT}"
-            service != null -> "Service: ON\nAPI: not running (see log below)"
-            enabledInSettings -> "Service: switched on but not connected yet.\nTry switching it off and on again."
-            else -> "Service: OFF\nTurn on \"Scrobot\" in Accessibility settings."
-        }
-        statusView.setTextColor(if (service?.isServerRunning == true) 0xFF2E7D32.toInt() else 0xFFC62828.toInt())
+        val state = Status.of(
+            enabledInSettings = AccessibilityRepair.isEnabledInSettings(this),
+            connected = HandsService.instance != null,
+            serverRunning = ApiServer.isRunning,
+            serverError = ApiServer.lastError,
+        )
+        statusView.text = state.headline
+        statusView.setTextColor(colourOf(state.level))
+        warningView.text = if (state.isWorking) "" else state.detail
+        warningView.visibility = if (state.isWorking) View.GONE else View.VISIBLE
+        fixButton.visibility = if (state.isWorking) View.GONE else View.VISIBLE
+        repairButton.visibility = if (AccessibilityRepair.canRepair(this)) View.VISIBLE else View.GONE
+
         tokenView.text = Prefs.token(this)
         val pm = getSystemService(PowerManager::class.java)
         batteryView.text = if (pm.isIgnoringBatteryOptimizations(packageName)) {
@@ -85,9 +92,10 @@ class MainActivity : Activity() {
         logView.text = if (lines.isEmpty()) "No calls yet." else lines.joinToString("\n")
     }
 
-    private fun isEnabledInSettings(): Boolean {
-        val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-        return enabled.split(':').any { it.startsWith("$packageName/") }
+    private fun colourOf(level: Status.Level) = when (level) {
+        Status.Level.OK -> 0xFF2E7D32.toInt()
+        Status.Level.WARNING -> 0xFFE65100.toInt()
+        Status.Level.ERROR -> 0xFFC62828.toInt()
     }
 
     // ---------------------------------------------------------------- UI
@@ -105,9 +113,13 @@ class MainActivity : Activity() {
         column.addView(header("Status"))
         statusView = text("", 16f, bold = true)
         column.addView(statusView)
-        column.addView(button("Open Accessibility settings") {
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-        })
+        warningView = text("", 15f).apply { setTextColor(0xFFC62828.toInt()) }
+        column.addView(warningView)
+        fixButton = button("Fix it: open Accessibility settings") { openAccessibilitySettings() }
+        column.addView(fixButton)
+        column.addView(button("Open Accessibility settings") { openAccessibilitySettings() })
+        repairButton = button("Repair accessibility (off and on)") { repair() }
+        column.addView(repairButton)
         if (Build.VERSION.SDK_INT >= 33) {
             column.addView(text("If the switch is greyed out: App info → ⋮ → Allow restricted settings.", 14f))
             column.addView(button("Open App info") {
@@ -137,6 +149,18 @@ class MainActivity : Activity() {
         batteryView = text("", 15f)
         column.addView(batteryView)
         column.addView(button("Ignore battery optimisations") { requestBatteryExemption() })
+        column.addView(text("On Samsung, also add Scrobot to \"Never auto sleeping apps\".", 13f))
+        column.addView(button("Open battery settings") { openBatterySettings() })
+
+        column.addView(header("Problem log"))
+        column.addView(text("Crashes, server errors and connect/disconnect events are kept on the phone.", 13f))
+        column.addView(row(
+            button("View / share log") { showCrashLog() },
+            button("Clear") {
+                CrashLog.clear()
+                Toast.makeText(this, "Log cleared", Toast.LENGTH_SHORT).show()
+            },
+        ))
 
         column.addView(header("Scripts"))
         scriptsHeader = text("", 13f)
@@ -207,9 +231,9 @@ class MainActivity : Activity() {
     }
 
     private fun api(): Api? {
-        val api = HandsService.instance?.api
+        val api = ApiServer.api()
         if (api == null) {
-            Toast.makeText(this, "Turn the accessibility service on first", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "The local API is not running yet", Toast.LENGTH_LONG).show()
         }
         return api
     }
@@ -307,6 +331,62 @@ class MainActivity : Activity() {
             }
         }
         return uri.lastPathSegment?.substringAfterLast('/') ?: "script-${System.currentTimeMillis()}"
+    }
+
+    // ---------------------------------------------------------------- status and log
+
+    private fun openAccessibilitySettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Could not open Accessibility settings", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun openBatterySettings() {
+        // Samsung's "Never auto sleeping apps" lives under the phone's own battery screen, which
+        // has no public intent, so this opens the standard one and the hint says where to look.
+        val screens = listOf(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")),
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+        )
+        for (intent in screens) {
+            try {
+                startActivity(intent)
+                return
+            } catch (e: Exception) {
+                continue
+            }
+        }
+        Toast.makeText(this, "Could not open the battery settings", Toast.LENGTH_LONG).show()
+    }
+
+    /** Only from this button: Android never lets the app do it unasked, and neither do we. */
+    private fun repair() {
+        val message = AccessibilityRepair.repair(this)
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        refresh()
+    }
+
+    private fun showCrashLog() {
+        val log = CrashLog.text()
+        val body = text(log, 11f, mono = true).apply { setTextIsSelectable(true) }
+        AlertDialog.Builder(this)
+            .setTitle("Problem log")
+            .setView(ScrollView(this).apply { addView(body); setPadding(dp(16), dp(8), dp(16), dp(8)) })
+            .setPositiveButton("Close", null)
+            .setNeutralButton("Share") { _, _ ->
+                val share = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_SUBJECT, "Scrobot log")
+                    .putExtra(Intent.EXTRA_TEXT, log.takeLast(120_000))
+                try {
+                    startActivity(Intent.createChooser(share, "Share the log"))
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Nothing to share it with", Toast.LENGTH_LONG).show()
+                }
+            }
+            .show()
     }
 
     // ---------------------------------------------------------------- views

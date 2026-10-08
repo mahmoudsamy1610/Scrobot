@@ -103,7 +103,11 @@ class ScriptRunner(private val context: Context, private val api: Api) {
             if (isRunning) throw ApiError("\"${current?.name}\" is still running; stop it first", 409)
             val job = Job(ids.incrementAndGet(), label, kind)
             current = job
-            Thread({ execute(job, source, args, timeout) }, "scrobot-script-${job.id}").apply {
+            Thread({
+                // execute() already catches everything; this is the last line of defence so that
+                // a bad script can never end the process.
+                CrashLog.guard("running script ${job.name}") { execute(job, source, args, timeout) }
+            }, "scrobot-script-${job.id}").apply {
                 isDaemon = true
                 start()
             }
@@ -155,6 +159,7 @@ class ScriptRunner(private val context: Context, private val api: Api) {
         } catch (e: Throwable) {
             job.error = e.toString()
             job.exit = 1
+            CrashLog.error("script \"${job.name}\" failed", e)
         } finally {
             job.finishedAt = System.currentTimeMillis()
             job.done.countDown()

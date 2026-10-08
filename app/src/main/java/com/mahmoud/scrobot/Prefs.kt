@@ -10,10 +10,12 @@ object Prefs {
     private const val FILE = "scrobot"
     private const val KEY_TOKEN = "token"
     private const val KEY_API_ENABLED = "api_enabled"
+    private const val KEY_DISCONNECTED_SINCE = "disconnected_since"
+    private const val KEY_WARNED = "warned"
     private const val TOKEN_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
-    const val PORT = 8765
-    const val VERSION = "2.1"
+    const val PORT = Status.PORT
+    const val VERSION = "2.2"
 
     private fun prefs(context: Context): SharedPreferences =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -52,6 +54,20 @@ object Prefs {
 
     fun setApiEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_API_ENABLED, enabled).apply()
+    }
+
+    /** When the accessibility service went away while still switched on, or 0 when all is well. */
+    fun disconnectedSince(context: Context): Long = prefs(context).getLong(KEY_DISCONNECTED_SINCE, 0)
+
+    fun setDisconnectedSince(context: Context, at: Long) {
+        prefs(context).edit().putLong(KEY_DISCONNECTED_SINCE, at).apply()
+    }
+
+    /** So the "not connected" notification is posted once per episode, not every heartbeat. */
+    fun wasWarned(context: Context): Boolean = prefs(context).getBoolean(KEY_WARNED, false)
+
+    fun setWarned(context: Context, warned: Boolean) {
+        prefs(context).edit().putBoolean(KEY_WARNED, warned).apply()
     }
 
     fun tokenFile(context: Context): File? = context.getExternalFilesDir(null)?.let { File(it, "token.txt") }

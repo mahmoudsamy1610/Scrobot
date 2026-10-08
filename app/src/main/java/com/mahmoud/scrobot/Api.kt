@@ -29,8 +29,24 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-/** Implementation of every endpoint, on top of the connected [AccessibilityService]. */
-class Api(private val service: AccessibilityService) {
+/**
+ * Implementation of every endpoint.
+ *
+ * It outlives the accessibility service on purpose: [accessibility] is looked up per call, so when
+ * the service has crashed or been switched off the endpoints answer with a clear 503 and /ping
+ * explains why, instead of the whole API disappearing.
+ */
+class Api(private val context: Context, private val accessibility: () -> AccessibilityService?) {
+
+    /** The connected accessibility service, or a clear error naming what the user has to do. */
+    private fun service(): AccessibilityService =
+        accessibility() ?: throw ApiError(status().reason ?: Status.NOT_CONNECTED, 503)
+
+    private fun status(): Status.State = Status.of(
+        enabledInSettings = AccessibilityRepair.isEnabledInSettings(context),
+        connected = accessibility() != null,
+        serverRunning = true,
+    )
 
     private val callbackThread = HandlerThread("hands-callbacks").apply { start() }
     private val callbackHandler = Handler(callbackThread.looper)
@@ -40,10 +56,16 @@ class Api(private val service: AccessibilityService) {
     /** Every endpoint, by path. Scripts call these directly; the HTTP server goes through [Router]. */
     private val actions = LinkedHashMap<String, (JSONObject) -> Any>()
 
-    val scripts = ScriptRunner(service, this)
+    val scripts = ScriptRunner(context, this)
 
     init {
-        actions["/ping"] = { JSONObject().put("version", Prefs.VERSION).put("service", true) }
+        actions["/ping"] = {
+            val state = status()
+            JSONObject()
+                .put("version", Prefs.VERSION)
+                .put("service", state.isWorking)
+                .apply { state.reason?.let { put("reason", it) } }
+        }
         actions["/screen"] = ::screen
         actions["/tap"] = { a -> tap(int(a, "x"), int(a, "y"), a.optLong("ms", 60)) }
         actions["/longpress"] = { a -> tap(int(a, "x"), int(a, "y"), a.optLong("ms", 800)) }
@@ -59,7 +81,7 @@ class Api(private val service: AccessibilityService) {
         actions["/sleep"] = ::sleep
         actions["/screenshot"] = ::screenshot
         actions["/clipboard"] = ::clipboard
-        actions["/scripts"] = { JSONObject().put("scripts", ScriptStore.listJson(service)).put("dir", ScriptStore.dir(service).absolutePath) }
+        actions["/scripts"] = { JSONObject().put("scripts", ScriptStore.listJson(context)).put("dir", ScriptStore.dir(context).absolutePath) }
         actions["/script/run"] = { a -> scripts.run(a) }
         actions["/script/stop"] = { scripts.stop() }
         actions["/script/status"] = { a ->
@@ -102,7 +124,7 @@ class Api(private val service: AccessibilityService) {
         val name = str(a, "name") ?: throw ApiError("missing \"name\"")
         val source = if (a.has("source") && !a.isNull("source")) a.getString("source")
             else throw ApiError("missing \"source\"")
-        val file = ScriptStore.save(service, name, source)
+        val file = ScriptStore.save(context, name, source)
         ApiLog.note("Imported script \"${file.name}\"")
         return JSONObject().put("imported", ScriptStore.toJson(file))
     }
@@ -111,7 +133,7 @@ class Api(private val service: AccessibilityService) {
     private fun checkScript(a: JSONObject): JSONObject {
         val name = str(a, "name")
         val source = if (a.has("source") && !a.isNull("source")) a.getString("source")
-        else ScriptStore.find(service, name ?: throw ApiError("give \"name\" or \"source\""))?.readText()
+        else ScriptStore.find(context, name ?: throw ApiError("give \"name\" or \"source\""))?.readText()
             ?: throw ApiError("no script called \"$name\"", 404)
         val kind = if (name != null) ScriptStore.Kind.of(name) else ScriptStore.Kind.ACTIONS
         val out = JSONObject().put("kind", kind.label)
@@ -131,13 +153,13 @@ class Api(private val service: AccessibilityService) {
 
     private fun readScript(a: JSONObject): JSONObject {
         val name = str(a, "name") ?: throw ApiError("missing \"name\"")
-        val file = ScriptStore.find(service, name) ?: throw ApiError("no script called \"$name\"", 404)
+        val file = ScriptStore.find(context, name) ?: throw ApiError("no script called \"$name\"", 404)
         return JSONObject().put("script", ScriptStore.toJson(file)).put("source", file.readText())
     }
 
     private fun deleteScript(a: JSONObject): JSONObject {
         val name = str(a, "name") ?: throw ApiError("missing \"name\"")
-        if (!ScriptStore.delete(service, name)) throw ApiError("no script called \"$name\"", 404)
+        if (!ScriptStore.delete(context, name)) throw ApiError("no script called \"$name\"", 404)
         return JSONObject().put("deleted", name)
     }
 
@@ -146,7 +168,7 @@ class Api(private val service: AccessibilityService) {
     /** Like /click's search, but it only reports what it found. */
     private fun find(a: JSONObject): JSONObject {
         val sel = selector(a)
-        val found = Nodes.find(service, sel)
+        val found = Nodes.find(service(), sel)
         return JSONObject().put("found", found != null)
             .put("node", found?.let { Nodes.toJson(it.node, it.win) } ?: JSONObject.NULL)
     }
@@ -156,9 +178,9 @@ class Api(private val service: AccessibilityService) {
         val direction = (str(a, "direction") ?: "next").lowercase()
         val sel = Selector.from(a)
         val target = if (!sel.isEmpty) {
-            Nodes.find(service, sel) ?: throw ApiError("no visible node matches ${sel.describe()}", 404)
+            Nodes.find(service(), sel) ?: throw ApiError("no visible node matches ${sel.describe()}", 404)
         } else {
-            val candidates = Nodes.focusable(service)
+            val candidates = Nodes.focusable(service())
             if (candidates.isEmpty()) throw ApiError("nothing on screen can take focus", 404)
             val currentIndex = candidates.indexOfFirst { it.node.isFocused }
             when (direction) {
@@ -209,7 +231,7 @@ class Api(private val service: AccessibilityService) {
     private fun scroll(a: JSONObject): JSONObject {
         val direction = (str(a, "direction") ?: "forward").lowercase()
         val sel = Selector.from(a)
-        val target = if (!sel.isEmpty) Nodes.find(service, sel) else Nodes.largestScrollable(service)
+        val target = if (!sel.isEmpty) Nodes.find(service(), sel) else Nodes.largestScrollable(service())
         val action = when (direction) {
             "forward", "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
             "backward", "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
@@ -223,7 +245,7 @@ class Api(private val service: AccessibilityService) {
                 .put("node", Nodes.toJson(target.node, target.win))
         }
         // Swiping the opposite way to the scroll: to move the list forward, drag content upwards.
-        val bounds = target?.let { Rect().also { r -> it.node.getBoundsInScreen(r) } } ?: Nodes.screenBounds(service)
+        val bounds = target?.let { Rect().also { r -> it.node.getBoundsInScreen(r) } } ?: Nodes.screenBounds(service())
         val cx = bounds.centerX()
         val cy = bounds.centerY()
         val dy = (bounds.height() * 0.35).toInt().coerceAtLeast(80)
@@ -256,7 +278,7 @@ class Api(private val service: AccessibilityService) {
 
     private fun screen(a: JSONObject): Any {
         val all = flag(a, "all")
-        val wins = Nodes.windows(service)
+        val wins = Nodes.windows(service())
         if (a.optString("format") == "text") {
             val sb = StringBuilder()
             for ((i, win) in wins.withIndex()) {
@@ -325,7 +347,7 @@ class Api(private val service: AccessibilityService) {
                     result.set("cancelled"); latch.countDown()
                 }
             }
-            if (!service.dispatchGesture(gesture, callback, callbackHandler)) {
+            if (!service().dispatchGesture(gesture, callback, callbackHandler)) {
                 throw ApiError("dispatchGesture was rejected by the system", 500)
             }
             if (!latch.await(duration + 5000, TimeUnit.MILLISECONDS)) {
@@ -339,7 +361,7 @@ class Api(private val service: AccessibilityService) {
 
     private fun click(a: JSONObject): JSONObject {
         val sel = selector(a)
-        val found = Nodes.find(service, sel) ?: throw ApiError("no visible node matches ${sel.describe()} (index ${sel.index})", 404)
+        val found = Nodes.find(service(), sel) ?: throw ApiError("no visible node matches ${sel.describe()} (index ${sel.index})", 404)
         return clickFound(found).put("matched", Nodes.toJson(found.node, found.win))
     }
 
@@ -397,7 +419,7 @@ class Api(private val service: AccessibilityService) {
     /** Picks the field to type into: by selector, else the focused input, else the first editable node. */
     private fun resolveField(sel: Selector): Found {
         if (!sel.isEmpty) {
-            val found = Nodes.find(service, sel) ?: throw ApiError("no visible field matches ${sel.describe()}", 404)
+            val found = Nodes.find(service(), sel) ?: throw ApiError("no visible field matches ${sel.describe()}", 404)
             if (found.node.isEditable) return found
             var editable: AccessibilityNodeInfo? = null
             Nodes.walk(found.node) { n -> if (n.isEditable && n.isVisibleToUser) { editable = n; false } else true }
@@ -414,8 +436,8 @@ class Api(private val service: AccessibilityService) {
     private fun focusedInput(timeoutMs: Long, pkg: String? = null): Found? {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (true) {
-            val wins = Nodes.windows(service)
-            val candidates = listOfNotNull(service.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)) +
+            val wins = Nodes.windows(service())
+            val candidates = listOfNotNull(service().findFocus(AccessibilityNodeInfo.FOCUS_INPUT)) +
                 Nodes.searchOrder(wins).mapNotNull { it.root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }
             val node = candidates.firstOrNull { it.isEditable && (pkg == null || it.packageName?.toString() == pkg) }
             if (node != null) {
@@ -429,7 +451,7 @@ class Api(private val service: AccessibilityService) {
     }
 
     private fun firstEditable(pkg: String?): Found? {
-        for (win in Nodes.searchOrder(Nodes.windows(service))) {
+        for (win in Nodes.searchOrder(Nodes.windows(service()))) {
             if (win.type == "input_method") continue
             if (pkg != null && win.pkg != pkg) continue
             var hit: AccessibilityNodeInfo? = null
@@ -503,7 +525,7 @@ class Api(private val service: AccessibilityService) {
                             "lock_screen, screenshot, split_screen, power, enter",
                     )
                 }
-                service.performGlobalAction(action)
+                service().performGlobalAction(action)
             }
         }
         if (!ok) throw ApiError("the system refused key \"$name\"", 500)
@@ -517,7 +539,7 @@ class Api(private val service: AccessibilityService) {
         val uri = str(a, "uri") ?: str(a, "url")
         val intent = when {
             uri != null -> Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply { if (pkg != null) setPackage(pkg) }
-            pkg != null -> service.packageManager.getLaunchIntentForPackage(pkg)
+            pkg != null -> context.packageManager.getLaunchIntentForPackage(pkg)
                 ?: throw ApiError("no launchable app with package \"$pkg\"", 404)
             else -> throw ApiError("give \"package\" or \"uri\"")
         }
@@ -527,7 +549,7 @@ class Api(private val service: AccessibilityService) {
             intent.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
         }
         try {
-            onMain { service.startActivity(intent) }
+            onMain { context.startActivity(intent) }
         } catch (e: ActivityNotFoundException) {
             throw ApiError("nothing can open $uri", 404)
         }
@@ -546,7 +568,7 @@ class Api(private val service: AccessibilityService) {
         val interval = a.optLong("interval", 250).coerceIn(50, 5000)
         val started = SystemClock.uptimeMillis()
         while (true) {
-            val found = Nodes.find(service, sel)
+            val found = Nodes.find(service(), sel)
             val waited = SystemClock.uptimeMillis() - started
             if (gone && found == null) return JSONObject().put("gone", true).put("waited_ms", waited)
             if (!gone && found != null) {
@@ -579,7 +601,7 @@ class Api(private val service: AccessibilityService) {
             val given = a.optString("save").trim()
             val name = if (given.isEmpty()) "shot-${System.currentTimeMillis()}.${if (jpeg) "jpg" else "png"}"
                 else ScriptStore.safeName(given)
-            val file = java.io.File(ScriptStore.shotsDir(service), name)
+            val file = java.io.File(ScriptStore.shotsDir(context), name)
             file.writeBytes(bytes)
             return JSONObject().put("mime", mime).put("width", bitmap.width).put("height", bitmap.height)
                 .put("saved", file.absolutePath)
@@ -595,7 +617,7 @@ class Api(private val service: AccessibilityService) {
             val latch = CountDownLatch(1)
             val bitmap = AtomicReference<Bitmap?>(null)
             val error = AtomicReference(0)
-            service.takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor,
+            service().takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor,
                 object : AccessibilityService.TakeScreenshotCallback {
                     override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
                         try {
@@ -643,8 +665,8 @@ class Api(private val service: AccessibilityService) {
             return JSONObject().put("set", true).put("length", text.length)
         }
         val text = onMain {
-            val cm = service.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(service)?.toString()
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
         }
         val out = JSONObject().put("text", text ?: JSONObject.NULL)
         if (text == null) {
@@ -655,7 +677,7 @@ class Api(private val service: AccessibilityService) {
 
     private fun setClip(text: String) {
         onMain {
-            val cm = service.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cm.setPrimaryClip(ClipData.newPlainText("Scrobot", text))
         }
     }

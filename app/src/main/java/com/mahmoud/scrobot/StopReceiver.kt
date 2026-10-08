@@ -8,8 +8,9 @@ import android.content.Intent
 class StopReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Prefs.setApiEnabled(context, false)
-        HandsService.instance?.stopServer()
+        ApiServer.stop()
         KeepAliveService.stop(context)
         ApiLog.note("Stopped from the notification")
+        CrashLog.note("stopped from the notification")
     }
 }

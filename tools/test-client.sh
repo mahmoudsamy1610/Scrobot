@@ -23,7 +23,7 @@ trap 'kill $STUB 2>/dev/null' EXIT
 for _ in $(seq 50); do curl -s "$HANDS_URL/ping" >/dev/null && break; sleep 0.2; done
 
 EXPECT='"ok":true' check "ping" "$HANDS" ping
-EXPECT='"version":"2.1"' check "ping version" "$HANDS" ping
+EXPECT='"version":"2.2"' check "ping version" "$HANDS" ping
 RC=1 EXPECT='"ok":false' check "no token -> ok:false" env HANDS_TOKEN=wrong "$HANDS" ping
 EXPECT='401' check "no token -> 401" curl -s -o /dev/null -w '%{http_code}' "$HANDS_URL/ping"
 EXPECT='401' check "wrong token -> 401" curl -s -o /dev/null -w '%{http_code}' -H 'X-Token: nope' "$HANDS_URL/ping"
@@ -68,6 +68,11 @@ if command -v ss >/dev/null; then
     echo "FAIL  bound to 127.0.0.1 only: ${addrs:-not listening}"; fails=$((fails+1))
   fi
 fi
+
+# --- the API answers honestly while the accessibility service is away
+EXPECT='"service":true' check "ping says the service works" "$HANDS" ping
+EXPECT='"service":false' check "ping admits when it does not" curl -s -H "X-Token: $TOKEN" "$HANDS_URL/ping?disconnected=true"
+EXPECT='Turn Scrobot off and on' check "ping says what to do about it" curl -s -H "X-Token: $TOKEN" "$HANDS_URL/ping?disconnected=true"
 
 # --- v2: navigation and scripts
 EXPECT='"direction":"next"' check "focus default" "$HANDS" focus

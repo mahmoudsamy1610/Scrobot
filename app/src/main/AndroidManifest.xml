@@ -9,6 +9,13 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
         tools:ignore="BatteryLife" />
+    <!--
+        Only useful if the user grants it themselves, once, over adb:
+          adb shell pm grant com.mahmoud.scrobot android.permission.WRITE_SECURE_SETTINGS
+        It powers the "Repair accessibility" button and nothing else.
+    -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Lets /open find the launch activity of any installed app (Android 11+ package visibility). -->
     <queries>
@@ -64,5 +71,13 @@
         <receiver
             android:name=".StopReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".UpdateReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

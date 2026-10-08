@@ -55,14 +55,14 @@ class ShellRunner(
             throw ApiError("could not start $SHELL: $e", 500)
         }
         val reader = Thread({
-            try {
+            CrashLog.guard("reading the script's output") {
                 BufferedReader(InputStreamReader(process.inputStream)).forEachLine { job.log(it) }
-            } catch (_: Exception) {
             }
         }, "scrobot-sh-out-${job.id}").apply { isDaemon = true; start() }
         val bridge = ShellBridge(bridgeDir, ::answer)
-        val watcher = Thread({ bridge.serve { process.isAlive } }, "scrobot-sh-bridge-${job.id}")
-            .apply { isDaemon = true; start() }
+        val watcher = Thread({
+            CrashLog.guard("serving the shell bridge") { bridge.serve { process.isAlive } }
+        }, "scrobot-sh-bridge-${job.id}").apply { isDaemon = true; start() }
 
         try {
             while (process.isAlive) {

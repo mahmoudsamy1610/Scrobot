@@ -14,13 +14,14 @@ permission and exposes a small **HTTP API on `127.0.0.1:8765`**. Requests need a
 |---|---|
 | `app/src/main/java/com/mahmoud/scrobot/` | `HandsService` (accessibility service, owns everything below), `Api` (endpoints), `Nodes` (window/node search), `HttpServer` + `Router` (hand-written HTTP server, token check), `MainActivity`, `KeepAliveService` (foreground notification), `StopReceiver`, `Prefs`, `ApiLog` |
 | …`ScriptStore` `ScriptParser` `ActionInterpreter` `ScriptRunner` `JsRunner` `ShellRunner` | version 2: imported scripts — the scripts folder, the action language, its interpreter, and the JavaScript and shell engines |
+| …`ApiServer` `Status` `CrashLog` `AccessibilityList` `AccessibilityRepair` `UpdateReceiver` | version 2.2: staying alive and telling the truth about it — see **When it says ON but does nothing** |
 | `examples/` | scripts to import and try |
 | `app/src/main/res/xml/accessibility_service_config.xml` | gestures, window content, screenshots, `flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews`, all event types |
 | `client/hands` | Bash client for Termux / proot Ubuntu |
 | `keystore/scrobot-release.jks.gpg` | The release signing key, encrypted (AES-256). The password is only in the `KEYSTORE_PASSWORD` GitHub secret. Every future version must be signed with this key to install over the old one. |
 | `tools/build-offline.sh` | Builds the signed APK without the Android Gradle Plugin (this is how the release APK was made) |
 | `tools/desugar/`, `tools/check-desugar.sh` | Rewrites `invokedynamic` lambdas into plain classes, and proves the rewrite is faithful. See **Lambdas** below. |
-| `tools/jvmtest/`, `tools/test-client.sh` | Runs the real `HttpServer`, `Router`, `ScriptParser`, `ActionInterpreter`, `ShellBridge` and `JsBridge` on a JVM: 172 checks of the script language, both script engines and the `hands` client. `scrobot-jvmtest parse FILE` checks a script without a phone, and `scrobot-jvmtest js FILE` prints the program a `.js` script really runs. |
+| `tools/jvmtest/`, `tools/test-client.sh` | Runs the real `HttpServer`, `Router`, `ScriptParser`, `ActionInterpreter`, `ShellBridge` and `JsBridge` on a JVM: 218 checks of the script language, both script engines, the status and crash-log behaviour, server restarts and the `hands` client. `scrobot-jvmtest parse FILE` checks a script without a phone, and `scrobot-jvmtest js FILE` prints the program a `.js` script really runs. |
 
 ## Download the latest APK
 
@@ -33,6 +34,37 @@ https://github.com/mahmoudsamy1610/Scrobot/releases/latest/download/scrobot.apk
 The versionCode goes up with every run, so each APK installs over the previous one.
 CI signs with the encrypted key in `keystore/`, unlocked by the repository secret `KEYSTORE_PASSWORD`
 (Settings → Secrets and variables → Actions). Without that secret the build stops before signing.
+
+## When it says ON but does nothing
+
+If an accessibility service crashes, Android puts it on a "crashed" list, leaves the Settings
+switch ON, shows *Not working*, and will not reconnect it until the user turns it off and on again.
+Version 2.2 is about never getting into that state, and being honest when it happens anyway.
+
+- **Nothing crashes the process.** Every script run, every bridge and watcher thread and every
+  request is wrapped, and an uncaught-exception handler logs anything that still escapes. Only the
+  main thread is allowed to be fatal; a background thread simply ends, and the service lives on.
+  A badly written script can fail only itself.
+- **The server outlives the service.** The HTTP server belongs to `ApiServer`, not to the
+  accessibility service, so when accessibility goes away `/ping` still answers — with
+  `"service": false` and a `reason` — instead of leaving Termux with a refused connection. A
+  supervisor thread restarts the server if it dies and retries with a growing delay if the port is
+  busy; `SO_REUSEADDR` means a restart can take the port straight back.
+- **The screen tells the truth.** *Switched on in Settings* and *actually connected* are shown as
+  the different things they are. If accessibility is ON but not connected, the main screen shows a
+  red warning and a button that opens Accessibility settings, the status notification changes to
+  "Scrobot needs attention", and after about a minute a notification says so too.
+- **After an update**, `UpdateReceiver` brings the API back and re-arms that warning, because an
+  update unbinds the service and Android does not always bind it again.
+- **Problem log.** Crashes, server errors and connect/disconnect events go to a file inside the
+  app, with **View / share log** on the main screen. No adb needed.
+- **Repair accessibility** appears only if the app holds `WRITE_SECURE_SETTINGS`, which only you
+  can grant, once:
+  `adb shell pm grant com.mahmoud.scrobot android.permission.WRITE_SECURE_SETTINGS`.
+  It switches Scrobot's own service off and on. It never runs by itself.
+- **Battery**: the foreground service returns `START_STICKY`, and the main screen shows whether
+  battery optimisation is excluded, with a button and the reminder to add Scrobot to Samsung's
+  *Never auto sleeping apps*.
 
 ## Lambdas: why this build has its own desugaring step
 

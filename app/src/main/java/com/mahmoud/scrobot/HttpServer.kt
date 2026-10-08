@@ -39,6 +39,8 @@ class HttpServer(
     private val port: Int,
     private val handler: (HttpRequest) -> HttpResponse,
     private val host: String = "127.0.0.1",
+    /** Where a thread-level failure is reported. The app writes it to its log file. */
+    private val onError: (String, Throwable) -> Unit = { _, _ -> },
 ) {
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
@@ -57,19 +59,32 @@ class HttpServer(
         val pool = Executors.newFixedThreadPool(6)
         workers = pool
         acceptThread = Thread({
-            while (!socket.isClosed) {
-                val client = try {
-                    socket.accept()
-                } catch (e: SocketException) {
-                    break
-                } catch (e: IOException) {
-                    continue
+            // Nothing may escape this thread: an uncaught exception here would end the process,
+            // and Android would then refuse to reconnect the accessibility service.
+            try {
+                while (!socket.isClosed) {
+                    val client = try {
+                        socket.accept()
+                    } catch (e: SocketException) {
+                        break
+                    } catch (e: IOException) {
+                        continue
+                    }
+                    try {
+                        pool.execute {
+                            try {
+                                serve(client)
+                            } catch (e: Throwable) {
+                                onError("serving a request", e)
+                                closeQuietly(client)
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        closeQuietly(client)
+                    }
                 }
-                try {
-                    pool.execute { serve(client) }
-                } catch (e: Exception) {
-                    closeQuietly(client)
-                }
+            } catch (e: Throwable) {
+                onError("the accept loop stopped", e)
             }
         }, "hands-http-accept").apply { isDaemon = true; start() }
     }
@@ -99,7 +114,8 @@ class HttpServer(
                 textResponse(e.status, e.message ?: "bad request")
             }
             if (response != null) writeResponse(output, response)
-        } catch (_: Exception) {
+        } catch (e: Throwable) {
+            onError("serving a request", e)
         } finally {
             closeQuietly(client)
         }

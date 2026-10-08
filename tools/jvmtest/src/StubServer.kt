@@ -34,7 +34,7 @@ private fun parseFiles(paths: List<String>): Int {
 
 fun main(args: Array<String>) {
     if (args.firstOrNull() == "test") {
-        kotlin.system.exitProcess(ParserTest.run() + EngineTest.run())
+        kotlin.system.exitProcess(ParserTest.run() + EngineTest.run() + StabilityTest.run())
     }
     if (args.firstOrNull() == "js") {
         // Prints the exact program the app feeds to its WebView, for debugging.
@@ -47,7 +47,12 @@ fun main(args: Array<String>) {
     val token = args.getOrElse(0) { "TESTTOKEN" }
     val port = args.getOrElse(1) { "8765" }.toInt()
     val router = Router({ token }, { m, p, ok, err, ms -> System.err.println("$m $p ok=$ok err=$err ${ms}ms") })
-    router.route("/ping") { JSONObject().put("version", "2.1") }
+    // "disconnected=1" pretends the accessibility service went away, as the app reports it.
+    router.route("/ping") { a ->
+        val state = Status.of(enabledInSettings = true, connected = !a.optBoolean("disconnected"), serverRunning = true)
+        JSONObject().put("version", "2.2").put("service", state.isWorking)
+            .apply { state.reason?.let { put("reason", it) } }
+    }
     for (path in listOf(
         "/tap", "/longpress", "/swipe", "/click", "/type", "/key", "/open", "/wait", "/clipboard",
         "/focus", "/scroll", "/sleep", "/script/run", "/script/stop", "/script/import",
