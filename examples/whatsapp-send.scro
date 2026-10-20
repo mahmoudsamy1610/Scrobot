@@ -1,0 +1,21 @@
+# Send a WhatsApp message.
+#   hands run whatsapp-send.scro "Mahmoud Samy" "Hello 👋 مرحبا"
+# $1 is the contact, $2 the message.
+
+open com.whatsapp
+wait "Chats" 10000
+
+click "Ask Meta AI or Search"
+type "$1"
+sleep 800
+
+if-missing "$1"
+  echo "no chat called $1"
+  stop
+end
+
+click "$1"
+wait "Type a message" 8000
+type "$2" "Type a message"
+click-id com.whatsapp:id/send
+echo "sent to $1"

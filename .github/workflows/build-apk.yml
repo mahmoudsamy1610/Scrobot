@@ -1,0 +1,96 @@
+# Builds a signed APK on every push and publishes it as a GitHub Release.
+# Newest APK, always at the same link (log in to GitHub first; the repo is private):
+#   https://github.com/mahmoudsamy1610/Scrobot/releases/latest/download/scrobot.apk
+name: Build APK
+
+on:
+  push:
+    branches: ["**"]
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set version
+        # 1.0.<run>; versionCode grows with every run so each APK installs over the previous one
+        # (the first hand-built APK was versionCode 1).
+        run: |
+          echo "VERSION_NAME=3.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$((GITHUB_RUN_NUMBER + 100))" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle (wrapper, with retries)
+        # services.gradle.org sometimes answers 500; retry instead of failing the build.
+        run: |
+          echo "GRADLE=$GITHUB_WORKSPACE/gradlew" >> "$GITHUB_ENV"
+          for i in 1 2 3 4 5; do ./gradlew --version -q -p tools/jvmtest && exit 0; sleep $((i * 15)); done
+          exit 1
+
+      - name: Install Android build tools (Ubuntu packages)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq aapt apksigner zipalign dalvik-exchange
+
+      - name: Cache Android framework jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/scrobot-sdk
+          key: android-all-16-robolectric-13921718-14-robolectric-10818077
+
+      - name: Check the lambda desugaring
+        # Without this the APK crashes on Android with NoSuchMethodError: ... metafactory.
+        run: tools/check-desugar.sh
+
+      - name: Test the script language, both engines and the hands client
+        run: |
+          "$GRADLE" -q --no-daemon -p tools/jvmtest installDist
+          tools/test-client.sh
+
+      - name: Build and sign APK
+        env:
+          # Repository secret: unlocks keystore/scrobot-release.jks.gpg (and is the keystore password).
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Add the KEYSTORE_PASSWORD secret: repo Settings > Secrets and variables > Actions > New repository secret"
+            exit 1
+          fi
+          tools/build-offline.sh
+          cp "app/build/outputs/apk/release/scrobot-$VERSION_NAME.apk" scrobot.apk
+          cp client/hands hands
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrobot-${{ env.VERSION_NAME }}
+          path: |
+            scrobot.apk
+            hands
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$VERSION_NAME"
+          gh release create "$tag" scrobot.apk hands \
+            --target "$GITHUB_SHA" \
+            --title "Scrobot $VERSION_NAME (${GITHUB_REF_NAME})" \
+            --notes "Built from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}: $(git log -1 --format=%s)
+
+          Install: download scrobot.apk on the phone and open it. It installs over the previous version." \
+            --latest
